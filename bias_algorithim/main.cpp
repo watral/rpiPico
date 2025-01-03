@@ -42,6 +42,59 @@ public:
     }
 };
 
+
+//removed shifted wave, and instead will regrenrate data with phase shift other than 0, functions now resemble rPi pico counterparts
+/*
+class SineWaveData {
+public:
+    static std::vector<double> x_values;
+    static std::vector<double> y_values;
+    static size_t last_accessed_index;  // Track the last accessed index for both X and Y values
+
+    // Static methods to access x and y values
+    static void generateData(double x_start, double x_end, double step_size, double phase_shift) {
+        x_values.clear();
+        y_values.clear();
+        for (double x = x_start; x <= x_end; x += step_size) {
+            x_values.push_back(x);
+            y_values.push_back(1 + std::sin(x + 1 + phase_shift));  // Generate sine wave with phase shift
+        }
+        last_accessed_index = 0;  // Initialize last accessed index
+    }
+
+    // Set the PWM DAC based on voltage with 16-bit resolution
+    static void set_pwm_dac(size_t index) {
+        double voltage = x_values[index];  // Get X value (voltage) from the vector
+        double voltage_limit = 3.3;  // Assuming a 3.3V limit for PWM
+        int max_steps = 65535;  // 16-bit PWM resolution (65535 steps)
+        int step_value = static_cast<int>((voltage / voltage_limit) * max_steps);
+
+        // Here, replace with actual code to set PWM with 16-bit resolution
+        // gpio_pwm_write(step_value);  // Replace with your platform's PWM function
+        std::cout << "Setting PWM DAC with step value: " << step_value << std::endl;
+
+        // Update the last accessed index (this will be the current index of the X value)
+        last_accessed_index = index;  // Track the last accessed index
+    }
+
+    // Replace readYValue with analog_read(GPIO_PIN), simply pass through the function
+    static double analog_read_GPIO() {
+        // Simulate reading from an analog pin
+        // Replace with the actual GPIO reading code
+        double voltage = y_values[last_accessed_index];  // Return the Y value corresponding to the last accessed index
+        std::cout << "Reading GPIO for Y value: " << voltage << std::endl;
+        return voltage;
+    }
+
+    static size_t getSize() {
+        return x_values.size();
+    }
+};
+
+// Initialize static members
+size_t SineWaveData::last_accessed_index = 0;  // Initializing the static member
+*/
+
 // Static member variable initialization
 std::vector<double> SineWaveData::x_values;
 std::vector<double> SineWaveData::y_values;
@@ -60,6 +113,33 @@ double y_avg = 0;  // Average value for quad detection
 
 // TODO: Instead of reading and writing values, create a sweep function that sweep through the test data using the read and write functions
 // and write to a presized array then pass the array seperatly to a detect peaks, detect nulls, and detect quad functions by indexing through the array
+
+//TODO: Implement this scanning algorithim
+// Function to scan the PWM range and populate the result array
+/*
+std::vector<double> scanPWM() {
+    std::vector<double> resultArray(65536);  // 16-bit resolution, range 0-65535
+
+    // Scan through all possible PWM values in the 16-bit range
+    for (int pwm_value = 0; pwm_value <= 65535; pwm_value++) {
+        // Set the PWM DAC value (this controls the hardware or simulation)
+        SineWaveData::set_pwm_dac(pwm_value);
+
+        // Read the analog value from GPIO (this will be the system's response)
+        double analog_value = SineWaveData::analog_read_GPIO();
+
+        // Store the result in the array
+        resultArray[pwm_value] = analog_value;
+    }
+
+    // Optionally, output the result to verify (only if necessary)
+    std::cout << "PWM scan complete. Array populated with " << resultArray.size() << " values." << std::endl;
+
+    return resultArray;  // Return the populated array
+}
+*/
+
+
 void detectPeaksAndNulls() {
     double previous_y = SineWaveData::readYValue(0);
     int direction = 0; // 0 = unknown, 1 = increasing, -1 = decreasing
