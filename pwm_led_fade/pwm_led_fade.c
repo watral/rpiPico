@@ -14,7 +14,7 @@
 //stdio_init_all(); // Initialize USB serial output
 
 // Function to set the PWM duty cycle based on an input voltage between 0 and 3.3V
-void set_pwm_dac(float voltage) {
+void set_pwm_dac(float voltage) { //define pin in function
     // Clamp the input voltage to the range 0 to 3.3
     if (voltage < 0) voltage = 0;
     if (voltage > 3.3) voltage = 3.3;
