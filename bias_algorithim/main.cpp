@@ -355,7 +355,7 @@ void detectPeaksAndNulls(const std::vector<double>& resultArray) {
 
 void processQuadSetpoint(double quad_setpoint) {
     size_t steps = 0;
-    const double tolerance = 0.00001;
+    const double tolerance = 0.0001;
 
     // Initial conditions
     size_t current_index = quad_plus_indices[0];  // Assuming quad_plus_indices is defined elsewhere
