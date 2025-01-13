@@ -5,6 +5,7 @@
 
 #define MAX_INDICES 5 // Maximum size for peak and null indices
 
+/*
 // Static class that encapsulates the sine wave test data and provides static methods
 class SineWaveData {
 public:
@@ -41,24 +42,33 @@ public:
         return shifted_y_values;
     }
 };
+*/
 
 
 //removed shifted wave, and instead will regrenrate data with phase shift other than 0, functions now resemble rPi pico counterparts
-/*
+
 class SineWaveData {
 public:
     static std::vector<double> x_values;
     static std::vector<double> y_values;
     static size_t last_accessed_index;  // Track the last accessed index for both X and Y values
 
-    // Static methods to access x and y values
-    static void generateData(double x_start, double x_end, double step_size, double phase_shift) {
+    static void generateData(double x_start, double x_end, double phase_shift) {
         x_values.clear();
         y_values.clear();
-        for (double x = x_start; x <= x_end; x += step_size) {
+
+        // Number of steps for 16-bit resolution (65536 steps)
+        size_t num_steps = 65536;
+
+        // Calculate step size based on x range and number of steps
+        double step_size = (x_end - x_start) / (num_steps - 1);
+
+        for (size_t i = 0; i < num_steps; i++) {
+            double x = x_start + i * step_size;
             x_values.push_back(x);
             y_values.push_back(1 + std::sin(x + 1 + phase_shift));  // Generate sine wave with phase shift
         }
+
         last_accessed_index = 0;  // Initialize last accessed index
     }
 
@@ -71,7 +81,7 @@ public:
 
         // Here, replace with actual code to set PWM with 16-bit resolution
         // gpio_pwm_write(step_value);  // Replace with your platform's PWM function
-        std::cout << "Setting PWM DAC with step value: " << step_value << std::endl;
+        //std::cout << "Setting PWM DAC with step value: " << step_value << std::endl;
 
         // Update the last accessed index (this will be the current index of the X value)
         last_accessed_index = index;  // Track the last accessed index
@@ -82,7 +92,7 @@ public:
         // Simulate reading from an analog pin
         // Replace with the actual GPIO reading code
         double voltage = y_values[last_accessed_index];  // Return the Y value corresponding to the last accessed index
-        std::cout << "Reading GPIO for Y value: " << voltage << std::endl;
+        //std::cout << "Reading GPIO for Y value: " << voltage << std::endl;
         return voltage;
     }
 
@@ -93,7 +103,7 @@ public:
 
 // Initialize static members
 size_t SineWaveData::last_accessed_index = 0;  // Initializing the static member
-*/
+
 
 // Static member variable initialization
 std::vector<double> SineWaveData::x_values;
@@ -105,7 +115,7 @@ std::vector<size_t> null_indices;
 std::vector<size_t> quad_minus_indices;
 std::vector<size_t> quad_plus_indices;
 
-double threshold = 0.0005;  // Threshold for quad points detection
+double threshold = 0.0002;  // Threshold for quad points detection
 const double tolerance = 0.0000001;
 double y_avg = 0;  // Average value for quad detection
 
@@ -116,7 +126,7 @@ double y_avg = 0;  // Average value for quad detection
 
 //TODO: Implement this scanning algorithim
 // Function to scan the PWM range and populate the result array
-/*
+
 std::vector<double> scanPWM() {
     std::vector<double> resultArray(65536);  // 16-bit resolution, range 0-65535
 
@@ -137,9 +147,246 @@ std::vector<double> scanPWM() {
 
     return resultArray;  // Return the populated array
 }
+
+/*
+void detectPeaksAndNulls(const std::vector<double>& resultArray) {
+    // Initializing the previous_y to the first value in the result array
+    double previous_y = resultArray[0];
+    int direction = 0; // 0 = unknown, 1 = increasing, -1 = decreasing
+
+    // Iterate through the result array starting from the second element
+    for (size_t i = 1; i < resultArray.size(); ++i) {
+        double current_y = resultArray[i];
+
+        // Detect peak (increasing to decreasing)
+        if (current_y < previous_y) {
+            if (direction == 1) {
+                // It's a peak, record it
+                if (peak_indices.size() < MAX_INDICES) {
+                    peak_indices.push_back(i - 1);  // Store the index of the peak
+                    std::cout << "Peak detected at index: " << i - 1 << " (x, y) = ("
+                              << i - 1 << ", " << resultArray[i - 1] << ")" << std::endl;
+                }
+            }
+            direction = -1;  // Set direction to decreasing
+        }
+        // Detect null (decreasing to increasing)
+        else if (current_y > previous_y) {
+            if (direction == -1) {
+                // It's a null, record it
+                if (null_indices.size() < MAX_INDICES) {
+                    null_indices.push_back(i - 1);  // Store the index of the null
+                    std::cout << "Null detected at index: " << i - 1 << " (x, y) = ("
+                              << i - 1 << ", " << resultArray[i - 1] << ")" << std::endl;
+                }
+            }
+            direction = 1;  // Set direction to increasing
+        }
+
+        previous_y = current_y;  // Update previous_y for next iteration
+    }
+}
 */
 
+void detectPeaks(const std::vector<double>& resultArray) {
+    // Initializing the previous_y to the first value in the result array
+    double previous_y = resultArray[0];
+    int direction = 0; // 0 = unknown, 1 = increasing, -1 = decreasing
 
+    // Iterate through the result array starting from the second element
+    for (size_t i = 1; i < resultArray.size(); ++i) {
+        double current_y = resultArray[i];
+
+        // Detect peak (increasing to decreasing)
+        if (current_y < previous_y) {
+            if (direction == 1) {
+                // It's a peak, record it
+                if (peak_indices.size() < MAX_INDICES) {
+                    peak_indices.push_back(i - 1);  // Store the index of the peak
+                    std::cout << "Peak detected at index: " << i - 1 << " (x, y) = ("
+                              << i - 1 << ", " << resultArray[i - 1] << ")" << std::endl;
+                }
+            }
+            direction = -1;  // Set direction to decreasing
+        }
+        // Detect null (decreasing to increasing)
+        else if (current_y > previous_y) {
+            if (direction == -1) {
+                // It's a null, record it
+                /*
+                if (null_indices.size() < MAX_INDICES) {
+                    null_indices.push_back(i - 1);  // Store the index of the null
+                    std::cout << "Null detected at index: " << i - 1 << " (x, y) = ("
+                              << i - 1 << ", " << resultArray[i - 1] << ")" << std::endl;
+                }
+                */
+            }
+            direction = 1;  // Set direction to increasing
+        }
+
+        previous_y = current_y;  // Update previous_y for next iteration
+    }
+}
+
+void detectNulls(const std::vector<double>& resultArray) {
+    // Initializing the previous_y to the first value in the result array
+    double previous_y = resultArray[0];
+    int direction = 0; // 0 = unknown, 1 = increasing, -1 = decreasing
+
+    // Iterate through the result array starting from the second element
+    for (size_t i = 1; i < resultArray.size(); ++i) {
+        double current_y = resultArray[i];
+
+        // Detect peak (increasing to decreasing)
+        if (current_y < previous_y) {
+            if (direction == 1) {
+                // It's a peak, record it
+                /*
+                if (peak_indices.size() < MAX_INDICES) {
+                    peak_indices.push_back(i - 1);  // Store the index of the peak
+                    std::cout << "Peak detected at index: " << i - 1 << " (x, y) = ("
+                              << i - 1 << ", " << resultArray[i - 1] << ")" << std::endl;
+                }
+                */
+            }
+            direction = -1;  // Set direction to decreasing
+        }
+        // Detect null (decreasing to increasing)
+        else if (current_y > previous_y) {
+            if (direction == -1) {
+                // It's a null, record it
+                if (null_indices.size() < MAX_INDICES) {
+                    null_indices.push_back(i - 1);  // Store the index of the null
+                    std::cout << "Null detected at index: " << i - 1 << " (x, y) = ("
+                              << i - 1 << ", " << resultArray[i - 1] << ")" << std::endl;
+                }
+            }
+            direction = 1;  // Set direction to increasing
+        }
+
+        previous_y = current_y;  // Update previous_y for next iteration
+    }
+}
+
+double find_quad(double peak_setpoint) {
+    return peak_setpoint / 2;
+}
+
+// Method to detect quad minus using the resultArray
+void handleQuadMinus(const std::vector<double>& resultArray, double average_y) {
+    for (size_t i = 1; i < resultArray.size(); ++i) {
+        double previous_y = resultArray[i - 1];
+        double current_y = resultArray[i];
+
+        // Check if previous value is greater than current (decreasing slope)
+        if (previous_y > current_y) {
+            // Check if current value is close to the average (within threshold)
+            if (std::abs(current_y - average_y) <= threshold) {
+                quad_minus_indices.push_back(i);
+                std::cout << "Quad Minus detected at index: " << i << " (y) = "
+                          << resultArray[i] << std::endl;
+            }
+        }
+    }
+}
+
+// Method to detect quad plus using the resultArray
+void handleQuadPlus(const std::vector<double>& resultArray, double average_y) {
+    for (size_t i = 1; i < resultArray.size(); ++i) {
+        double previous_y = resultArray[i - 1];
+        double current_y = resultArray[i];
+
+        // Check if previous value is less than current (increasing slope)
+        if (previous_y < current_y) {
+            // Check if current value is close to the average (within threshold)
+            if (std::abs(current_y - average_y) <= threshold) {
+                quad_plus_indices.push_back(i);
+                std::cout << "Quad Plus detected at index: " << i << " (y) = "
+                          << resultArray[i] << std::endl;
+            }
+        }
+    }
+}
+
+// Function to detect both Quad Minus and Quad Plus
+void detectQuads(const std::vector<double>& resultArray) {
+    if (peak_indices.empty()) {
+        std::cout << "No peaks detected, unable to calculate Quad Setpoint." << std::endl;
+        return; // Early exit if no peaks are detected
+    }
+
+    // Find the first peak index and use it to get the Peak Setpoint
+    size_t first_peak_index = peak_indices[0];  // First peak index
+    double peak_setpoint = resultArray[first_peak_index];  // Get the peak Y-value
+
+    // Use the find_quad function to calculate the Quad Setpoint
+    double quad_setpoint = find_quad(peak_setpoint);
+
+    std::cout << "Peak Setpoint: " << peak_setpoint << " | Quad Setpoint: " << quad_setpoint << std::endl;
+
+    // Call the functions to detect Quad Minus and Quad Plus
+    handleQuadMinus(resultArray, quad_setpoint);  // Detect Quad Minus points
+    handleQuadPlus(resultArray, quad_setpoint);   // Detect Quad Plus points
+}
+
+int main() {
+    // Generate sine wave data
+    double x_start = 0.0;
+    double x_end = 20.0;
+    double phase_shift = 0;
+    SineWaveData::generateData(x_start, x_end, phase_shift);
+
+    // Perform PWM scan and get the result
+    std::vector<double> resultArray = scanPWM();
+
+    // Output a portion of the result to the console
+    std::cout << "First 10 values from PWM scan:" << std::endl;
+    for (size_t i = 0; i < 10; i++) {
+        std::cout << "PWM Value " << i << ": " << resultArray[i] << std::endl;
+    }
+
+    // Detect peaks and nulls from the result array
+    detectPeaks(resultArray);  // Detect peaks first
+    detectNulls(resultArray);  // Detect nulls next
+    detectQuads(resultArray); // Detect quads next
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<> dis(-10, 10);
+        
+    phase_shift = dis(gen);
+        
+    std::cout << "Phase shift: " << phase_shift << std::endl;
+    SineWaveData::generateData(x_start, x_end, phase_shift);
+
+    
+
+    return 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
 void detectPeaksAndNulls() {
     double previous_y = SineWaveData::readYValue(0);
     int direction = 0; // 0 = unknown, 1 = increasing, -1 = decreasing
@@ -284,7 +531,7 @@ void processNullSetpoint(const std::vector<double>& shifted_results, const SineW
         << ") after " << steps << " steps." << std::endl;
 }
 
-*/
+/*
 
 // Find the average for quad calculations
 double find_quad(double peak_setpoint) {
@@ -394,3 +641,5 @@ int main() {
 
     return 0;
 }
+
+*/
