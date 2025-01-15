@@ -3,8 +3,10 @@
 #include <cmath>  // For sin function
 #include <random> // For random number generation
 
-#define MAX_INDICES 5 // Maximum size for peak and null indices
+#define MAX_INDICES 5 // Maximum size for peak and null & quad indices
 #define MAX_ARRAY_SIZE 65536 //Maximum array size
+
+//TODO: MAKE PEAK/NULL/QUAD INDICES FIXED ARRAYS WITH A MAX SIZE OF 5, PASS A PIN FOR READ/WRITE, STANDARIZE FUNCTION NAME (CAMELCASE OR _), PUT FUNCTIONS IN ALPHABETICAL ORDER, CREATE A SEPERATE FUNCTION TO APPLY GLOBAL SETPOINT, INDICATE WHAT WILL TRANSFER TO RPIPICO, WHAT WILL NOT, AND WHAT WILL NEED TO BE CHANGED, CONVERT STEPS TO VOLTAGE FOR DEBUG
 
 enum setPoint {
     NULL_POINT,   // 0 by default
@@ -258,6 +260,7 @@ void handleQuadPlus(const std::vector<double>& resultArray, double average_y) {
     }
 }
 
+//TODO: ADJUST THRESHOLD, DURING TESTING A FEW DUPLICTES WERE FOUND
 // Function to detect both Quad Minus and Quad Plus
 void detectQuads(const std::vector<double>& resultArray) {
     if (peak_indices.empty()) {
@@ -265,6 +268,8 @@ void detectQuads(const std::vector<double>& resultArray) {
         return; // Early exit if no peaks are detected
     }
 
+
+    //TODO: ARE PEAK AND NULL NEEDED HERE?
     // Find the first peak index and use it to get the Peak Setpoint
     size_t first_null_index = null_indices[0];
     size_t first_peak_index = peak_indices[0];  // First peak index
@@ -353,6 +358,7 @@ void detectPeaksAndNulls(const std::vector<double>& resultArray) {
 }
 */
 
+//TODO: test quad_minus, and different points of indicies. 
 void processQuadSetpoint(double quad_setpoint) {
     size_t steps = 0;
     const double tolerance = 0.0001;
@@ -390,6 +396,71 @@ void processQuadSetpoint(double quad_setpoint) {
 }
 
 
+//TODO: use previous logic to adjust current index update, slope tracking (always go in direction of positive slope)
+void processPeakSetpoint(double peak_setpoint) {
+    size_t steps = 0;
+    const double tolerance = 0.0001;
+
+    size_t current_index = peak_indices[1];  // Initial index (already set)
+    SineWaveData::set_pwm_dac(current_index);  // Set PWM DAC with initial index
+    double previous_y = peak_setpoint;  // Get the initial Y value
+    double current_y = SineWaveData::analog_read_GPIO();
+
+    while (std::abs(current_y - peak_setpoint) > tolerance) {
+        //current_index = UPDATE HERE
+        
+        // Ensure the index is within valid bounds
+        if (current_index >= SineWaveData::getSize() || current_index < 0) {
+            std::cerr << "Peak Setpoint not reachable: Index out of bounds." << std::endl;
+            return;
+        }
+
+        SineWaveData::set_pwm_dac(current_index);
+        current_y = SineWaveData::analog_read_GPIO();
+
+        // Increment the step counter
+        previous_y = current_y;    // Update previous Y value to current Y value
+        steps++;
+    }
+
+    // Output the result
+    std::cout << "Peak Setpoint Reached: ("
+              << current_index << ", " << previous_y
+              << ") after " << steps << " steps." << std::endl;
+}
+
+//TODO: use previous logic to adjust current index update, slope tracking (always go in direction of negative slope)
+void processNullSetpoint(double null_setpoint) {
+    size_t steps = 0;
+    const double tolerance = 0.0001;
+
+    size_t current_index = null_indices[1];  // Initial index (already set)
+    SineWaveData::set_pwm_dac(current_index);  // Set PWM DAC with initial index
+    double previous_y = null_setpoint;  // Get the initial Y value
+    double current_y = SineWaveData::analog_read_GPIO();
+
+    while (std::abs(current_y - null_setpoint) > tolerance) {
+        //current_index = UPDATE HERE
+        
+        // Ensure the index is within valid bounds
+        if (current_index >= SineWaveData::getSize() || current_index < 0) {
+            std::cerr << "Null Setpoint not reachable: Index out of bounds." << std::endl;
+            return;
+        }
+
+        SineWaveData::set_pwm_dac(current_index);
+        current_y = SineWaveData::analog_read_GPIO();
+
+        // Increment the step counter
+        previous_y = current_y;    // Update previous Y value to current Y value
+        steps++;
+    }
+
+    // Output the result
+    std::cout << "Null Setpoint Reached: ("
+              << current_index << ", " << previous_y
+              << ") after " << steps << " steps." << std::endl;
+}
 
 
 int main() {
@@ -411,7 +482,7 @@ int main() {
     std::cout << "Phase shift: " << phase_shift << std::endl;
     SineWaveData::generateData(x_start, x_end, phase_shift);
 
-    setPoint set_point = QUAD_POINT;
+    setPoint set_point = PEAK_POINT;
     quad_setpoint = 1;
 
     if (set_point == NULL_POINT) {
@@ -421,19 +492,24 @@ int main() {
         double analog_value = SineWaveData::analog_read_GPIO();
 
         */
+
+       //processNullSetpoint(null_setpoint);
+
     }
 
     else if (set_point == QUAD_POINT) {
         processQuadSetpoint(quad_setpoint);
+
+        /*REALTIME IMPLEMENTATION
+        while(1) {
+            processQuadSetpoint(quad_setpoint);
+        }
+        */
+
     }
 
     else if (set_point == PEAK_POINT) {
-        /*
-        
-        SineWaveData::set_pwm_dac(peak_indices[0]);
-        double analog_value = SineWaveData::analog_read_GPIO();
-
-        */
+       processPeakSetpoint(peak_setpoint);
     }
 
 
