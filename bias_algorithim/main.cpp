@@ -253,14 +253,28 @@ void scanPWM() {
     std::cout << "PWM scan complete. Array populated with " << resultArray.size() << " values." << std::endl;
 }
 
-//TODO: Test quad_minus, and different points of indicies. 
-void processQuadSetpoint(double quad_setpoint) {
-    size_t steps = 0;
-    const double tolerance = 0.01;
+//TEST CODE
+size_t returnShiftedValueQuad() {
+    size_t current_index = quad_plus_indices[0];
+    SineWaveData::set_pwm_dac(current_index);
+    return current_index;
+}
 
+//TODO: Test quad_minus, and different points of indicies. 
+void processQuadSetpoint(size_t current_index) {
+    size_t step_count = 0;
+    const double tolerance = 0.01;
+    
+/*
     // Initial conditions
     size_t current_index = quad_plus_indices[0];  //Y value at equivalent X for shifted wave (same DAC voltage out, different ADC voltage in)
     SineWaveData::set_pwm_dac(current_index);
+    
+
+*/
+
+    //Move the setting of initial conditions to a seperate functions to 
+
     double current_y = SineWaveData::analog_read_GPIO();
 
     // Iterate until the difference is within the tolerance
@@ -284,13 +298,13 @@ void processQuadSetpoint(double quad_setpoint) {
         SineWaveData::set_pwm_dac(current_index);
         current_y = SineWaveData::analog_read_GPIO();
 
-        steps++;
+        step_count++;
     }
 
     // Output the result
     std::cout << "Quad Setpoint Reached: ("
               << current_index << ", " << current_y
-              << ") after " << steps << " steps." << std::endl;
+              << ") after " << step_count << " steps." << std::endl;
 }
 
 void processPeakSetpoint(double peak_setpoint) {
@@ -436,7 +450,7 @@ int main() {
     std::cout << "Phase shift: " << phase_shift << std::endl;
     SineWaveData::generateData(x_start, x_end, phase_shift);
 
-    setPoint set_point = NULL_POINT;
+    setPoint set_point = QUAD_POINT;
     quad_setpoint = 1;
 
     if (set_point == NULL_POINT) {
@@ -445,7 +459,11 @@ int main() {
     }
 
     else if (set_point == QUAD_POINT) {
-        processQuadSetpoint(quad_setpoint);
+        //TEST CODE
+        size_t current_index = returnShiftedValueQuad();
+        
+        //FUNCTIONAL CODE
+        processQuadSetpoint(current_index); 
 
         /*REALTIME IMPLEMENTATION
         while(1) {
