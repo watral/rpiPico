@@ -361,18 +361,24 @@ void detectPeaksAndNulls(const std::vector<double>& resultArray) {
 //TODO: test quad_minus, and different points of indicies. 
 void processQuadSetpoint(double quad_setpoint) {
     size_t steps = 0;
-    const double tolerance = 0.0001;
+    const double tolerance = 0.01;
 
     // Initial conditions
     size_t current_index = quad_plus_indices[0];  // Assuming quad_plus_indices is defined elsewhere
     SineWaveData::set_pwm_dac(current_index);
-    double previous_y = quad_setpoint;
+    //double previous_y = quad_setpoint;
     double current_y = SineWaveData::analog_read_GPIO();
 
     // Iterate until the difference is within the tolerance
     while (std::abs(current_y - quad_setpoint) > tolerance) {
         // Move the index depending on whether the value is increasing or decreasing
-        current_index = (current_y < previous_y) ? current_index - 1 : current_index + 1;
+        if (current_y > quad_setpoint) {
+            current_index--;
+        }
+
+        else {
+            current_index++;
+        }
 
         // Ensure the index is within valid bounds
         if (current_index >= SineWaveData::getSize() || current_index < 0) {
@@ -380,12 +386,12 @@ void processQuadSetpoint(double quad_setpoint) {
             return;
         }
 
+        //previous_y = current_y;
+
         // Update PWM DAC with new index and read the new Y value
         SineWaveData::set_pwm_dac(current_index);
         current_y = SineWaveData::analog_read_GPIO();
 
-        // Update the previous Y value to the current one
-        previous_y = current_y;
         steps++;
     }
 
@@ -399,15 +405,46 @@ void processQuadSetpoint(double quad_setpoint) {
 //TODO: use previous logic to adjust current index update, slope tracking (always go in direction of positive slope)
 void processPeakSetpoint(double peak_setpoint) {
     size_t steps = 0;
-    const double tolerance = 0.0001;
+    const double tolerance = 0.001;
 
     size_t current_index = peak_indices[1];  // Initial index (already set)
     SineWaveData::set_pwm_dac(current_index);  // Set PWM DAC with initial index
-    double previous_y = peak_setpoint;  // Get the initial Y value
     double current_y = SineWaveData::analog_read_GPIO();
+    double next_y = 0;
+    bool found_rising_edge = false; 
+    bool move_down = false;
+    bool move_up = false;
 
     while (std::abs(current_y - peak_setpoint) > tolerance) {
-        //current_index = UPDATE HERE
+        if (!found_rising_edge) {
+            SineWaveData::set_pwm_dac(current_index + 1);
+            next_y = SineWaveData::analog_read_GPIO();
+
+            if (next_y > current_y) {
+                found_rising_edge = true;
+                current_index++;
+                move_up = true;
+            }
+
+            else {
+                SineWaveData::set_pwm_dac(current_index - 1);
+                next_y = SineWaveData::analog_read_GPIO();
+                if (next_y > current_y) {
+                    found_rising_edge = true;
+                    current_index--;
+                    move_down = true;
+                }
+            }
+        } else {
+            if (move_up == true) {
+                // Move upward toward the peak    
+                current_index++;
+            } else if (move_down == true) {
+                // Move downward from the peak
+                current_index--; 
+            }
+
+        }
         
         // Ensure the index is within valid bounds
         if (current_index >= SineWaveData::getSize() || current_index < 0) {
@@ -416,31 +453,60 @@ void processPeakSetpoint(double peak_setpoint) {
         }
 
         SineWaveData::set_pwm_dac(current_index);
-        current_y = SineWaveData::analog_read_GPIO();
 
-        // Increment the step counter
-        previous_y = current_y;    // Update previous Y value to current Y value
+        current_y = SineWaveData::analog_read_GPIO();
         steps++;
     }
 
     // Output the result
     std::cout << "Peak Setpoint Reached: ("
-              << current_index << ", " << previous_y
+              << current_index << ", " << current_y
               << ") after " << steps << " steps." << std::endl;
 }
 
 //TODO: use previous logic to adjust current index update, slope tracking (always go in direction of negative slope)
 void processNullSetpoint(double null_setpoint) {
     size_t steps = 0;
-    const double tolerance = 0.0001;
+    const double tolerance = 0.01;
 
     size_t current_index = null_indices[1];  // Initial index (already set)
     SineWaveData::set_pwm_dac(current_index);  // Set PWM DAC with initial index
-    double previous_y = null_setpoint;  // Get the initial Y value
     double current_y = SineWaveData::analog_read_GPIO();
+    double next_y = 0;
+    bool found_falling_edge = false; 
+    bool move_down = false;
+    bool move_up = false;
 
     while (std::abs(current_y - null_setpoint) > tolerance) {
-        //current_index = UPDATE HERE
+        if (!found_falling_edge) {
+            SineWaveData::set_pwm_dac(current_index + 1);
+            next_y = SineWaveData::analog_read_GPIO();
+
+            if (next_y < current_y) {
+                found_falling_edge = true;
+                current_index++;
+                move_up = true;
+            }
+
+            else {
+                SineWaveData::set_pwm_dac(current_index - 1);
+                next_y = SineWaveData::analog_read_GPIO();
+                if (next_y < current_y) {
+                    found_falling_edge = true;
+                    current_index--;
+                    move_down = true;
+                }
+            }
+        } else {
+            if (move_up == true) {
+                // Move upward toward the peak    
+                current_index++;
+            } else if (move_down == true) {
+                // Move downward from the peak
+                current_index--; 
+            }
+
+        }
         
         // Ensure the index is within valid bounds
         if (current_index >= SineWaveData::getSize() || current_index < 0) {
@@ -449,16 +515,14 @@ void processNullSetpoint(double null_setpoint) {
         }
 
         SineWaveData::set_pwm_dac(current_index);
-        current_y = SineWaveData::analog_read_GPIO();
 
-        // Increment the step counter
-        previous_y = current_y;    // Update previous Y value to current Y value
+        current_y = SineWaveData::analog_read_GPIO();
         steps++;
     }
 
     // Output the result
     std::cout << "Null Setpoint Reached: ("
-              << current_index << ", " << previous_y
+              << current_index << ", " << current_y
               << ") after " << steps << " steps." << std::endl;
 }
 
@@ -475,14 +539,14 @@ int main() {
 
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_real_distribution<> dis(-10, 10);
+    std::uniform_real_distribution<> dis(-1, 1);
         
     phase_shift = dis(gen);
         
     std::cout << "Phase shift: " << phase_shift << std::endl;
     SineWaveData::generateData(x_start, x_end, phase_shift);
 
-    setPoint set_point = PEAK_POINT;
+    setPoint set_point = NULL_POINT;
     quad_setpoint = 1;
 
     if (set_point == NULL_POINT) {
@@ -493,7 +557,7 @@ int main() {
 
         */
 
-       //processNullSetpoint(null_setpoint);
+       processNullSetpoint(null_setpoint);
 
     }
 
