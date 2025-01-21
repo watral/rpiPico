@@ -21,10 +21,17 @@ enum setPoint {
     PEAK_POINT   
 };
 
+//Setpoint (Y value)
 double null_setpoint = 0;
 double peak_setpoint = 0;
 double quad_setpoint = 0;
 
+//Starting point (X value)
+int null_index = 0;
+int peak_index = 0;
+int quad_plus_index = 0;
+int quad_minus_index = 0;
+int current_index = 0;
 
 //TEST CODE
 // Peak and Null Detection functions (outside of SineWaveData class)
@@ -124,6 +131,7 @@ void detectPeaks(const std::vector<double>& resultArray) {
                 /*  FUNCTIONAL CODE
 
                     peak_setpoint = previous_y;    
+                    peak_index = i - 1;
                     break;
 
                     */
@@ -177,6 +185,7 @@ void detectNulls(const std::vector<double>& resultArray) {
                 /*  FUNCTIONAL CODE
 
                     null_setpoint = previous_y;
+                    null_index = i - 1;
                     break;    
 
                     */
@@ -191,14 +200,14 @@ void detectNulls(const std::vector<double>& resultArray) {
 }
 
 //Midpoint of a sine wave
-double find_quad(double peak_setpoint) {
-    return peak_setpoint / 2;
+void find_quad() {
+    quad_setpoint = peak_setpoint / 2;
 }
 
 //TODO: ASK MICAH WHETHER TO DEFAULT TO QUAD_PLUS OR QUAD_MINUS IN THE FUNCTIONAL CODE
 
 // Method to detect quad minus using the resultArray
-void handleQuadMinus(const std::vector<double>& resultArray, double average_y) {
+void handleQuadMinus(const std::vector<double>& resultArray) {
     for (size_t i = 1; i < resultArray.size(); ++i) {
         double previous_y = resultArray[i - 1];
         double current_y = resultArray[i];
@@ -206,28 +215,32 @@ void handleQuadMinus(const std::vector<double>& resultArray, double average_y) {
         // Check if previous value is greater than current (decreasing slope)
         if (previous_y > current_y) {
             // Check if current value is close to the average (within threshold)
-            if (std::abs(current_y - average_y) <= threshold) {
+            if (std::abs(current_y - quad_setpoint) <= threshold) {
                 
                 //TEST CODE
                 //TODO: SEPERATE OUT THIS TEST CODE TO SEERATE FUNCTION
 
+                /*
                 quad_minus_indices.push_back(i);
+                */
+
+                
+                //quad_setpoint = current_y;
+                quad_minus_index = i;
+                //DEBUG
                 std::cout << "Quad Minus detected at index: " << i << " (y) = "
                           << resultArray[i] << std::endl;
+                break;
 
-                /*  FUNCTIONAL CODE
-                    
-                    quad_setpoint = current_y;
-                    break;
-
-                */
             }
         }
     }
 }
 
+
+//TODO: EDGE CASE: QUAD DETECTED BUT INDEX IS CLOSE TO 0
 // Method to detect quad plus using the resultArray
-void handleQuadPlus(const std::vector<double>& resultArray, double average_y) {
+void handleQuadPlus(const std::vector<double>& resultArray) {
     for (size_t i = 1; i < resultArray.size(); ++i) {
         double previous_y = resultArray[i - 1];
         double current_y = resultArray[i];
@@ -235,20 +248,22 @@ void handleQuadPlus(const std::vector<double>& resultArray, double average_y) {
         // Check if previous value is less than current (increasing slope)
         if (previous_y < current_y) {
             // Check if current value is close to the average (within threshold)
-            if (std::abs(current_y - average_y) <= threshold) {
+            if (std::abs(current_y - quad_setpoint) <= threshold) {
                 
                 //TEST CODE
-                //TODO: SEPERATE OUT THIS TEST CODE TO SEERATE FUNCTION
-                
-                quad_plus_indices.push_back(i);
-
+                //TODO: SEPERATE OUT THIS TEST CODE TO SEERATE FUNCTION 
+                //quad_plus_indices.push_back(i);
+                //quad_setpoint = current_y;
+                quad_plus_index = i;
                 //DEBUG
                 std::cout << "Quad Plus detected at index: " << i << " (y) = "
                           << resultArray[i] << std::endl;
+                break;
 
                 /*  FUNCTIONAL CODE
                     
-                    quad_setpoint = i;
+                    //quad_setpoint = current_y;
+                    quad_plus_index = i;
                     break;
 
                 */
@@ -265,21 +280,25 @@ void handleQuadPlus(const std::vector<double>& resultArray, double average_y) {
 void detectQuads(const std::vector<double>& resultArray) {
     
     //DEBUG
-    if (peak_indices.empty()) {
+    if (peak_setpoint == 0) {
         std::cout << "No peaks detected, unable to calculate Quad Setpoint." << std::endl;
         return; // Early exit if no peaks are detected
     }
 
     // Use the find_quad function to calculate the Quad Setpoint
-    double quad_setpoint = find_quad(peak_setpoint);
+    find_quad();
 
+/*
     //DEBUG
     std::cout << "Peak Setpoint: " << peak_setpoint << " | Quad Setpoint: " << quad_setpoint << " | Null Setpoint: " << null_setpoint << std::endl;
+*/
 
     // Call the functions to detect Quad Minus and Quad Plus
-    handleQuadMinus(resultArray, quad_setpoint);  // Detect Quad Minus points
-    handleQuadPlus(resultArray, quad_setpoint);   // Detect Quad Plus points
+    handleQuadMinus(resultArray);  // Detect Quad Minus points
+    handleQuadPlus(resultArray);   // Detect Quad Plus points
 }
+
+//May not need to detect quad if we already know what the setpoint is
 
 
 void scanPWM() {
@@ -313,12 +332,14 @@ void scanPWM() {
     std::cout << "PWM scan complete. Array populated with " << resultArray.size() << " values." << std::endl;
 }
 
+/*
 //TEST CODE
 size_t returnShiftedValueQuad() {
     size_t current_index = quad_plus_indices[0]; //Default to first value (This was chosen after a discusion with micah)
     SineWaveData::set_pwm_dac(current_index);
     return current_index;
 }
+*/
 
 size_t returnShiftedValuePeak() {
     size_t current_index = peak_indices[0];
@@ -335,20 +356,27 @@ size_t returnShiftedValueNull() {
 
 //TODO: Test quad_minus, and different points of indicies. 
 //FUNCTIONAL CODE
-void processQuadSetpoint(size_t current_index) {
+void processQuadSetpoint() {
     size_t step_count = 0;
     const double tolerance = 0.01;
-    
     double current_y = SineWaveData::adc_read();
 
     // Iterate until the difference is within the tolerance
     while (std::abs(current_y - quad_setpoint) > tolerance) {
         // Move the index depending on whether the value is increasing or decreasing
+        
         if (current_y > quad_setpoint) {
             current_index--;
         }
 
+        
         else {
+            current_index++;
+        }
+
+        //Handle edge case 
+        //TODO: Make sure to handle case where quad isn't reachable on the first rising edge/falling edge
+        if (current_index == 0) {
             current_index++;
         }
 
@@ -372,7 +400,7 @@ void processQuadSetpoint(size_t current_index) {
               << ") after " << step_count << " steps." << std::endl;
 }
 
-void processPeakSetpoint(size_t current_index) {
+void processPeakSetpoint() {
     size_t steps = 0;
     const double tolerance = 0.001;
 
@@ -433,7 +461,7 @@ void processPeakSetpoint(size_t current_index) {
 }
 
 //TODO: use previous logic to adjust current index update, slope tracking (always go in direction of negative slope)
-void processNullSetpoint(size_t current_index) {
+void processNullSetpoint() {
     size_t steps = 0;
     const double tolerance = 0.01;
 
@@ -513,50 +541,61 @@ int main() {
 
     //DEBUG         
     std::cout << "Phase shift: " << phase_shift << std::endl;
+    
+    /*
+    //TEST
     SineWaveData::generateData(x_start, x_end, phase_shift);
+    */
 
+    //FUNCTIONAL
     setPoint set_point = QUAD_POINT;
     quad_setpoint = 1;
 
     if (set_point == NULL_POINT) {
-       //TEST CODE
-       size_t current_index = returnShiftedValueNull();
+       SineWaveData::set_pwm_dac(null_index);
+       current_index = null_index;
         
         //FUNCTIONAL CODE
-       processNullSetpoint(null_setpoint);
+       processNullSetpoint();
 
        /*REALTIME IMPLEMENTATION
         while(1) {
-            processNullSetpoint(quad_setpoint);
+            processNullSetpoint();
         }
         */
 
     }
 
     else if (set_point == QUAD_POINT) {
-        //TEST CODE
-        size_t current_index = returnShiftedValueQuad();
+        SineWaveData::set_pwm_dac(quad_plus_index);
+        current_index = quad_plus_index;
+        //TEST
+        SineWaveData::generateData(x_start, x_end, phase_shift);
         
-        //FUNCTIONAL CODE
-        processQuadSetpoint(current_index); 
+        processQuadSetpoint(); 
 
         /*REALTIME IMPLEMENTATION
+
         while(1) {
-            processQuadSetpoint(quad_setpoint);
+            processQuadSetpoint();
         }
         */
 
     }
 
     else if (set_point == PEAK_POINT) {
-       //TEST CODE
-       size_t current_index = returnShiftedValuePeak();
+       SineWaveData::set_pwm_dac(peak_index);
+       current_index = peak_index;
+
+       //TEST
+       SineWaveData::generateData(x_start, x_end, phase_shift);
        
-       processPeakSetpoint(peak_setpoint);
+       processPeakSetpoint();
 
        /*REALTIME IMPLEMENTATION
+    
         while(1) {
-            processPeakSetpoint(quad_setpoint);
+            processPeakSetpoint();
         }
         */
     }
