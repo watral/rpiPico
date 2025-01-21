@@ -3,15 +3,13 @@
 #include <cmath>  // For sin function
 #include <random> // For random number generation
 
-#define MAX_INDICES 5 // Maximum size for peak and null & quad indices
-#define MAX_ARRAY_SIZE 65536 //Maximum array size
-
+#define MAX_VOLTAGE 65536 //Maximum array size
+#define MIN_VOLTAGE 0
+#define SWEEP_RANGE 6.5
 
 /*TODO: 
 
-TRY TO REMOVE PEAK/NULL/QUAD INDICI AS VECTOR AND RATHER SINGLE VALUE (CAN START CURRENT INDEX AS 0 AND DRIVE TO SETPOINT), STANDARIZE FUNCTION NAME (CAMELCASE OR _), 
-PUT FUNCTIONS IN ALPHABETICAL ORDER,,INDICATE WHAT WILL TRANSFER TO RPIPICO, WHAT WILL NOT, AND WHAT WILL NEED TO BE CHANGED
-FIND OPTIMAL QUAD TOLERANCE, ASK MICAH ABOUT QUAD PLUS/MINUS, ASK BROOKE/PAUL FOR TEST SIGNAL CHARACTERISTICS, CREATE INIT FUNCTION FOR CLASS,
+GO THROUGH NAMING AND PUT IN ALPHABETICAL ORDER
 
 */
 
@@ -31,14 +29,8 @@ int null_index = 0;
 int peak_index = 0;
 int quad_plus_index = 0;
 int quad_minus_index = 0;
+int quad_index = 0;
 int current_index = 0;
-
-//TEST CODE
-// Peak and Null Detection functions (outside of SineWaveData class)
-std::vector<size_t> peak_indices;
-std::vector<size_t> null_indices;
-std::vector<size_t> quad_minus_indices;
-std::vector<size_t> quad_plus_indices;
 
 //FUNCTIONAL CODE
 double threshold = 0.0002;  // Threshold for quad points detection
@@ -57,7 +49,7 @@ public:
         y_values.clear();
 
         // Number of steps for 16-bit resolution (65536 steps)
-        size_t num_steps = MAX_ARRAY_SIZE;
+        size_t num_steps = MAX_VOLTAGE;
 
         // Calculate step size based on x range and number of steps
         double step_size = (x_end - x_start) / (num_steps - 1);
@@ -75,7 +67,7 @@ public:
     static void set_pwm_dac(size_t index) {
         double voltage = x_values[index];  // Get X value (voltage) from the vector
         double voltage_limit = 3.3;  // Assuming a 3.3V limit for PWM
-        int max_steps = MAX_ARRAY_SIZE;  // 16-bit PWM resolution (65536 steps)
+        int max_steps = MAX_VOLTAGE;  // 16-bit PWM resolution (65536 steps)
         int step_value = static_cast<int>((voltage / voltage_limit) * max_steps);
 
         //This only simulates an analog write
@@ -120,23 +112,12 @@ void detectPeaks(const std::vector<double>& resultArray) {
             if (direction == 1) {
                 // It's a peak, record it
                 
-                //TODO: SEPERATE OUT THIS TEST CODE TO SEERATE FUNCTION
-                
-                if (peak_indices.size() < MAX_INDICES) {
-                    peak_indices.push_back(i - 1);  // Store the index of the peak
-                    std::cout << "Peak detected at index: " << i - 1 << " (x, y) = ("
-                              << i - 1 << ", " << resultArray[i - 1] << ")" << std::endl;
-                }
-
-                /*  FUNCTIONAL CODE
-
-                    peak_setpoint = previous_y;    
-                    peak_index = i - 1;
-                    break;
-
-                    */
-
                 peak_setpoint = previous_y;
+                peak_index = i - 1;
+                //DEBUG
+                std::cout << "Peak detected at index: " << peak_index << " (x, y) = ("
+                              << peak_index << ", " << resultArray[peak_index] << ")" << std::endl;
+                break;
             }
             direction = -1;  // Set direction to decreasing
         }
@@ -160,7 +141,7 @@ void detectNulls(const std::vector<double>& resultArray) {
     // Iterate through the result array starting from the second element
     for (size_t i = 1; i < resultArray.size(); ++i) {
         double current_y = resultArray[i];
-
+      
         // Detect null (decreasing to increasing)
         if (current_y < previous_y) {
             if (direction == 1) {
@@ -168,30 +149,19 @@ void detectNulls(const std::vector<double>& resultArray) {
             }
             direction = -1;  // Set direction to decreasing
         }
+
         // Detect null (decreasing to increasing)
         else if (current_y > previous_y) {
             if (direction == -1) {
                 // It's a null, record it
-                
-                //TODO: SEPERATE OUT THIS TEST CODE TO SEERATE FUNCTION
-                if (null_indices.size() < MAX_INDICES) {
-                    null_indices.push_back(i - 1);  // Store the index of the null //TEST CODE
-                    
-                    
-                    std::cout << "Null detected at index: " << i - 1 << " (x, y) = ("
-                              << i - 1 << ", " << resultArray[i - 1] << ")" << std::endl;
-                }
 
-                /*  FUNCTIONAL CODE
-
-                    null_setpoint = previous_y;
-                    null_index = i - 1;
-                    break;    
-
-                    */
-                
                 null_setpoint = previous_y;
+                null_index = i - 1;
+                std::cout << "Null detected at index: " << null_index << " (x, y) = ("
+                              << null_index << ", " << resultArray[i - 1] << ")" << std::endl;
+                break;
             }
+
             direction = 1;  // Set direction to increasing
         }
 
@@ -204,7 +174,7 @@ void find_quad() {
     quad_setpoint = peak_setpoint / 2;
 }
 
-//TODO: ASK MICAH WHETHER TO DEFAULT TO QUAD_PLUS OR QUAD_MINUS IN THE FUNCTIONAL CODE
+//TODO: CHARLES SAID EITHER QUAD PLUS OR QUAD MINUS CAN BE USED: best to use the one at a greater voltage level
 
 // Method to detect quad minus using the resultArray
 void handleQuadMinus(const std::vector<double>& resultArray) {
@@ -217,19 +187,11 @@ void handleQuadMinus(const std::vector<double>& resultArray) {
             // Check if current value is close to the average (within threshold)
             if (std::abs(current_y - quad_setpoint) <= threshold) {
                 
-                //TEST CODE
-                //TODO: SEPERATE OUT THIS TEST CODE TO SEERATE FUNCTION
-
-                /*
-                quad_minus_indices.push_back(i);
-                */
-
-                
                 //quad_setpoint = current_y;
                 quad_minus_index = i;
                 //DEBUG
-                std::cout << "Quad Minus detected at index: " << i << " (y) = "
-                          << resultArray[i] << std::endl;
+                std::cout << "Quad Minus detected at index: " << quad_minus_index << " (y) = "
+                          << resultArray[quad_minus_index] << std::endl;
                 break;
 
             }
@@ -250,25 +212,12 @@ void handleQuadPlus(const std::vector<double>& resultArray) {
             // Check if current value is close to the average (within threshold)
             if (std::abs(current_y - quad_setpoint) <= threshold) {
                 
-                //TEST CODE
-                //TODO: SEPERATE OUT THIS TEST CODE TO SEERATE FUNCTION 
-                //quad_plus_indices.push_back(i);
-                //quad_setpoint = current_y;
                 quad_plus_index = i;
+                
                 //DEBUG
-                std::cout << "Quad Plus detected at index: " << i << " (y) = "
-                          << resultArray[i] << std::endl;
+                std::cout << "Quad Plus detected at index: " << quad_plus_index << " (y) = "
+                          << resultArray[quad_plus_index] << std::endl;
                 break;
-
-                /*  FUNCTIONAL CODE
-                    
-                    //quad_setpoint = current_y;
-                    quad_plus_index = i;
-                    break;
-
-                */
-
-
 
             }
         }
@@ -288,24 +237,27 @@ void detectQuads(const std::vector<double>& resultArray) {
     // Use the find_quad function to calculate the Quad Setpoint
     find_quad();
 
-/*
-    //DEBUG
-    std::cout << "Peak Setpoint: " << peak_setpoint << " | Quad Setpoint: " << quad_setpoint << " | Null Setpoint: " << null_setpoint << std::endl;
-*/
-
     // Call the functions to detect Quad Minus and Quad Plus
     handleQuadMinus(resultArray);  // Detect Quad Minus points
     handleQuadPlus(resultArray);   // Detect Quad Plus points
+
+    if (quad_plus_index > quad_minus_index) {
+        quad_index = quad_plus_index;
+    }
+
+    else {
+        quad_index = quad_minus_index;
+    }
 }
 
 //May not need to detect quad if we already know what the setpoint is
 
 
 void scanPWM() {
-    std::vector<double> resultArray(MAX_ARRAY_SIZE);  // 16-bit resolution, range 0-MAX_ARRAY_SIZE
+    std::vector<double> resultArray(MAX_VOLTAGE);  // 16-bit resolution, range 0-MAX_VOLTAGE
 
     // Scan through all possible PWM values in the 16-bit range
-    for (int pwm_value = 0; pwm_value <= MAX_ARRAY_SIZE; pwm_value++) {
+    for (int pwm_value = 0; pwm_value <= MAX_VOLTAGE; pwm_value++) {
         // Set the PWM DAC value (this controls the hardware or simulation)
         SineWaveData::set_pwm_dac(pwm_value);
 
@@ -316,11 +268,13 @@ void scanPWM() {
         resultArray[pwm_value] = analog_value;
     }
 
+/*
     //DEBUG
     std::cout << "First 10 values from PWM scan:" << std::endl;
     for (size_t i = 0; i < 10; i++) {
         std::cout << "PWM Value " << i << ": " << resultArray[i] << std::endl;
     }
+*/
 
     // Detect peaks and nulls from the result array
     detectPeaks(resultArray);  // Detect peaks first
@@ -332,30 +286,42 @@ void scanPWM() {
     std::cout << "PWM scan complete. Array populated with " << resultArray.size() << " values." << std::endl;
 }
 
-/*
-//TEST CODE
-size_t returnShiftedValueQuad() {
-    size_t current_index = quad_plus_indices[0]; //Default to first value (This was chosen after a discusion with micah)
-    SineWaveData::set_pwm_dac(current_index);
-    return current_index;
-}
-*/
-
-size_t returnShiftedValuePeak() {
-    size_t current_index = peak_indices[0];
-    SineWaveData::set_pwm_dac(current_index);
-    return current_index;
-}
-
-size_t returnShiftedValueNull() {
-    size_t current_index = null_indices[0];
-    SineWaveData::set_pwm_dac(current_index);
-    return current_index;
-}
-
-
-//TODO: Test quad_minus, and different points of indicies. 
 //FUNCTIONAL CODE
+
+void handleEdgeCase(double setpoint, double tolerance) {
+    double current_y;
+    
+    if (current_index <= MIN_VOLTAGE) {
+        current_index = MAX_VOLTAGE;
+            while (std::abs(current_y - setpoint) > tolerance) {
+                current_index--;
+                SineWaveData::set_pwm_dac(current_index);
+                current_y = SineWaveData::adc_read();
+
+                if (current_index == MIN_VOLTAGE) {
+                    std::cerr << "Setpoint not reachable" << std::endl;
+                    for (;;){}
+                    //break;
+                }
+        }
+    }
+
+    else if (current_index >= MAX_VOLTAGE) {
+        current_index = MIN_VOLTAGE;
+            while (std::abs(current_y - setpoint) > tolerance) {
+                current_index++;
+                SineWaveData::set_pwm_dac(current_index);
+                current_y = SineWaveData::adc_read();
+
+                if (current_index == MAX_VOLTAGE) {
+                    std::cerr << "Setpoint not reachable" << std::endl;
+                    for(;;){}
+                    //break;
+                }
+        }
+    }
+}
+
 void processQuadSetpoint() {
     size_t step_count = 0;
     const double tolerance = 0.01;
@@ -375,15 +341,9 @@ void processQuadSetpoint() {
         }
 
         //Handle edge case 
-        //TODO: Make sure to handle case where quad isn't reachable on the first rising edge/falling edge
-        if (current_index == 0) {
-            current_index++;
-        }
-
-        // Ensure the index is within valid bounds
-        if (current_index >= MAX_ARRAY_SIZE || current_index < 0) {
-            std::cerr << "Quad Setpoint not reachable." << std::endl;
-            return;
+        if (current_index <= MIN_VOLTAGE || current_index >= MAX_VOLTAGE) {
+            handleEdgeCase(quad_setpoint, tolerance);
+            //current_y = SineWaveData::adc_read();
         }
 
         // Update DAC and read new value
@@ -402,7 +362,7 @@ void processQuadSetpoint() {
 
 void processPeakSetpoint() {
     size_t steps = 0;
-    const double tolerance = 0.001;
+    const double tolerance = 0.0001;
 
     double current_y = SineWaveData::adc_read();
     double next_y = 0;
@@ -441,10 +401,10 @@ void processPeakSetpoint() {
 
         }
         
-        // Ensure the index is within valid bounds
-        if (current_index >= SineWaveData::getSize() || current_index < 0) {
-            std::cerr << "Peak Setpoint not reachable: Index out of bounds." << std::endl;
-            return;
+        //Handle edge case 
+        if (current_index <= MIN_VOLTAGE || current_index >= MAX_VOLTAGE) {
+            handleEdgeCase(peak_setpoint, tolerance);
+            //current_y = SineWaveData::adc_read();
         }
 
         SineWaveData::set_pwm_dac(current_index);
@@ -463,7 +423,7 @@ void processPeakSetpoint() {
 //TODO: use previous logic to adjust current index update, slope tracking (always go in direction of negative slope)
 void processNullSetpoint() {
     size_t steps = 0;
-    const double tolerance = 0.01;
+    const double tolerance = 0.0001;
 
     double current_y = SineWaveData::adc_read();
     double next_y = 0;
@@ -502,11 +462,10 @@ void processNullSetpoint() {
 
         }
         
-        //DEBUG
-        // Ensure the index is within valid bounds
-        if (current_index >= SineWaveData::getSize() || current_index < 0) {
-            std::cerr << "Null Setpoint not reachable: Index out of bounds." << std::endl;
-            return;
+        //Handle edge case 
+        if (current_index <= MIN_VOLTAGE || current_index >= MAX_VOLTAGE) {
+            handleEdgeCase(null_setpoint, tolerance);
+            //current_y = SineWaveData::adc_read();
         }
 
         SineWaveData::set_pwm_dac(current_index);
@@ -526,7 +485,7 @@ void processNullSetpoint() {
 int main() {
     // Generate sine wave data
     double x_start = 0.0;
-    double x_end = 20.0;
+    double x_end = SWEEP_RANGE;
     double phase_shift = 0;
     SineWaveData::generateData(x_start, x_end, phase_shift);
 
@@ -538,6 +497,7 @@ int main() {
     std::uniform_real_distribution<> dis(-1, 1);
         
     phase_shift = dis(gen);
+    //phase_shift = 1.3; //to manually adjust phase shift for debugging
 
     //DEBUG         
     std::cout << "Phase shift: " << phase_shift << std::endl;
@@ -548,17 +508,25 @@ int main() {
     */
 
     //FUNCTIONAL
-    setPoint set_point = QUAD_POINT;
+    setPoint set_point = NULL_POINT;
     quad_setpoint = 1;
 
     if (set_point == NULL_POINT) {
        SineWaveData::set_pwm_dac(null_index);
        current_index = null_index;
+       
+       //TEST
+        SineWaveData::generateData(x_start, x_end, phase_shift);
         
         //FUNCTIONAL CODE
        processNullSetpoint();
 
        /*REALTIME IMPLEMENTATION
+       
+       SineWaveData::set_pwm_dac(null_index);
+       current_index = null_index;
+       
+       
         while(1) {
             processNullSetpoint();
         }
@@ -568,13 +536,16 @@ int main() {
 
     else if (set_point == QUAD_POINT) {
         SineWaveData::set_pwm_dac(quad_plus_index);
-        current_index = quad_plus_index;
+        current_index = quad_index;
         //TEST
         SineWaveData::generateData(x_start, x_end, phase_shift);
         
         processQuadSetpoint(); 
 
         /*REALTIME IMPLEMENTATION
+
+        SineWaveData::set_pwm_dac(quad_plus_index);
+        current_index = quad_plus_index;
 
         while(1) {
             processQuadSetpoint();
@@ -594,6 +565,9 @@ int main() {
 
        /*REALTIME IMPLEMENTATION
     
+        SineWaveData::set_pwm_dac(peak_index);
+        current_index = peak_index;
+
         while(1) {
             processPeakSetpoint();
         }
