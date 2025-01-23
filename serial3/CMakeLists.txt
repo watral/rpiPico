@@ -9,15 +9,15 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Initialise pico_sdk from installed location
 # (note this can come from environment, CMake cache etc)
 
-# == DO NEVER EDIT THE NEXT LINES for Raspberry Pi Pico VS Code Extension to work ==
+# == DO NOT EDIT THE FOLLOWING LINES for the Raspberry Pi Pico VS Code Extension to work ==
 if(WIN32)
     set(USERHOME $ENV{USERPROFILE})
 else()
     set(USERHOME $ENV{HOME})
 endif()
-set(sdkVersion 2.0.0)
-set(toolchainVersion 13_2_Rel1)
-set(picotoolVersion 2.0.0)
+set(sdkVersion 2.1.0)
+set(toolchainVersion 13_3_Rel1)
+set(picotoolVersion 2.1.0)
 set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
 if (EXISTS ${picoVscode})
     include(${picoVscode})
@@ -28,31 +28,30 @@ set(PICO_BOARD pico CACHE STRING "Board type")
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
-project(SerialTest C CXX ASM)
+project(serial3 C CXX ASM)
 
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(SerialTest SerialTest.cpp )
+add_executable(serial3 serial3.c )
 
-pico_set_program_name(SerialTest "SerialTest")
-pico_set_program_version(SerialTest "0.1")
+pico_set_program_name(serial3 "serial3")
+pico_set_program_version(serial3 "0.1")
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(SerialTest 0)
-pico_enable_stdio_usb(SerialTest 1)
+pico_enable_stdio_uart(serial3 0)
+pico_enable_stdio_usb(serial3 1)
 
 # Add the standard library to the build
-target_link_libraries(SerialTest
+target_link_libraries(serial3
         pico_stdlib)
 
 # Add the standard include files to the build
-target_include_directories(SerialTest PRIVATE
+target_include_directories(serial3 PRIVATE
   ${CMAKE_CURRENT_LIST_DIR}
-  ${CMAKE_CURRENT_LIST_DIR}/.. # for our common lwipopts or any other standard includes, if required
 )
 
-pico_add_extra_outputs(SerialTest)
+pico_add_extra_outputs(serial3)
 
