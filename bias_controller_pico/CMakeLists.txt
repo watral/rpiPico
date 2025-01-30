@@ -23,35 +23,35 @@ if (EXISTS ${picoVscode})
     include(${picoVscode})
 endif()
 # ====================================================================================
-set(PICO_BOARD pico CACHE STRING "Board type")
+set(PICO_BOARD pico2 CACHE STRING "Board type")
 
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
-project(serial3 C CXX ASM)
+project(bias_controller_pico C CXX ASM)
 
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(serial3 serial3.c )
+add_executable(bias_controller_pico bias_controller_pico.c )
 
-pico_set_program_name(serial3 "serial3")
-pico_set_program_version(serial3 "0.1")
+pico_set_program_name(bias_controller_pico "bias_controller_pico")
+pico_set_program_version(bias_controller_pico "0.1")
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(serial3 0)
-pico_enable_stdio_usb(serial3 1)
+pico_enable_stdio_uart(bias_controller_pico 0)
+pico_enable_stdio_usb(bias_controller_pico 1)
 
 # Add the standard library to the build
-target_link_libraries(serial3
-        pico_stdlib)
+target_link_libraries(bias_controller_pico
+        pico_stdlib hardware_pwm hardware_adc)
 
 # Add the standard include files to the build
-target_include_directories(serial3 PRIVATE
-  ${CMAKE_CURRENT_LIST_DIR}
+target_include_directories(bias_controller_pico PRIVATE
+        ${CMAKE_CURRENT_LIST_DIR}
 )
 
-pico_add_extra_outputs(serial3)
+pico_add_extra_outputs(bias_controller_pico)
 

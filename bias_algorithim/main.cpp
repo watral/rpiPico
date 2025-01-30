@@ -3,7 +3,7 @@
 #include <cmath>  // For sin function
 #include <random> // For random number generation
 
-#define MAX_VOLTAGE 65536 //Maximum array size
+#define MAX_VOLTAGE 65535 //Maximum array size
 #define MIN_VOLTAGE 0
 #define SWEEP_RANGE 6.5
 
@@ -35,7 +35,6 @@ int current_index = 0;
 //FUNCTIONAL CODE
 double threshold = 0.0002;  // Threshold for quad points detection
 const double tolerance = 0.0000001;
-double y_avg = 0;  // Average value for quad detection
 
 //TEST CODE
 class SineWaveData {
