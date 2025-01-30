@@ -37,7 +37,7 @@ void initialize_adc() {
     adc_select_input(ADC_INPUT);  // Select ADC input 0 (GPIO 26)
 
     //DEBUG
-    printf("ADC INITIALIZED\n")
+    printf("ADC INITIALIZED\n");
 }
 
 void initialize_pwm() {
