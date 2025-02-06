@@ -29,7 +29,7 @@ int main() {
     while (true) {
         // Call the read_voltage function and print the result
         float voltage = read_voltage();
-        printf("Voltage: %.2f V \n", voltage);
+        printf("Voltage: %.4f V \n", voltage);
 
         sleep_ms(100);  // Delay for 100 ms
     }
