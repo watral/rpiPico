@@ -33,10 +33,10 @@ int peak_voltage = 0;
 //int quad_voltage = 0;
 int current_voltage = 0;
 
-float threshold = 0.01;  // Threshold for quad points detection
-const float tolerance = 0.01; //Tolerance for reaching setpoint
+//float threshold = 0.01;  // Threshold for quad points detection
+//const float tolerance = 0.01; //Tolerance for reaching setpoint
 
-int average_per_read = 5;
+int average_per_read = 1;
 
 
 /*
@@ -182,6 +182,9 @@ void detect_quad() {
     quad_setpoint = peak_setpoint / 2;
 }
 
+void go_to_setpoint() {
+    
+}
 
 // Function to initialize the ADC hardware and select the input (GPIO 26)
 void initialize_adc() {
@@ -228,7 +231,7 @@ float read_voltage() {
     for (int i = 0; i < average_per_read; i++) {
         float voltage = raw_value * conversion_factor;
         total_voltage += voltage;
-        sleep_ms(2);
+        sleep_ms(2); //Allow ADC to settle
     }
 
     return total_voltage / average_per_read;
@@ -271,7 +274,6 @@ void scanPWM() {
 
         // Store the result in the array
         result_array[pwm_value] = analog_value;
-        sleep_ms(1);
     }
 
     // Pass the array as a reference to the functions to avoid duplication
@@ -306,6 +308,7 @@ int main()
     initialize_pwm();
     initialize_adc();
 
+
 /*
     while (true) {
         // Call the read_voltage function and print the result
@@ -317,6 +320,13 @@ int main()
 */
     while(1) {
         scanPWM();
-        sleep_ms(1000);
+        peak_voltage = peak_voltage * 16;
+        null_voltage = null_voltage * 16;
+        for (;;) {
+            
+            set_pwm_dac(null_voltage);
+            printf("%d Index\n", null_voltage);
+            sleep_ms(2);
+        }
     }
 }
