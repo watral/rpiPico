@@ -31,7 +31,7 @@ enum setPoint set_point = QUAD_POINT;
 
 
 //Modify these
-const float tolerance           = 0.1f;             //Tolerance for reaching setpoint
+const float tolerance           = 0.05f;             //Tolerance for reaching setpoint
 const int average_per_read      = 1;                //Amount of averaged ADC reads per single ADC read
 const int array_size            = MAX_12BIT_STEPS;  //Array size for sweep_pwm
 
@@ -189,7 +189,7 @@ void go_to_setpoint() {
     float read        = 0.0f;
     float difference  = 0.0f;
     int voltage_step  = 0;
-    
+    int step_size     = MAX_16BIT_STEPS / MAX_12BIT_STEPS; //Use 12-bit step size for faster convergence, Use step_size of 1 for greater tighter tolerance but slower speed
     
     if (set_point == PEAK_POINT) {
         setpoint = peak_setpoint;
@@ -209,6 +209,9 @@ void go_to_setpoint() {
 
     printf("VOLTAGE STEP BEFORE 1ST READ %d \n", voltage_step);
     set_pwm_dac(voltage_step); 
+    
+    sleep_ms(100); //Allow DAC to settle (REASON: PWM signal from MAX voltage to MIN voltage takes some time to settle through the RC circuit)
+
     read = read_voltage();
     
     printf("READ AFTER VOLTAGE STEP %.4f V\n", read);
@@ -233,10 +236,12 @@ void go_to_setpoint() {
         set_pwm_dac(voltage_step);
         read = read_voltage();
         difference = fabs(read - setpoint);
-        voltage_step++;
+        voltage_step += step_size;
+        //printf("VOLTAGE STWP %d \n", voltage_step);
     }
 
     printf("INITIAL SETPOINT REACHED\n");
+    //printf("READ: %.4f V", read);
     
 }
 
@@ -276,7 +281,7 @@ float read_voltage() {
 }
 */
 
-void scanPWM() {
+void sweep() {
     /*
     const int MAX_12BIT_VOLTAGE = 4096;   // Max value for a 12-bit DAC (now 4096)
     const int MAX_16BIT_VOLTAGE = 65536;  // Max value for a 16-bit DAC (65536)
@@ -332,6 +337,79 @@ void scanPWM() {
 
 }
 
+void handleEdgeCase(double setpoint, double tolerance) {
+    float current_y = 0.0f;
+    
+    if (current_output_voltage_step <= MIN_VOLTAGE) {
+        current_output_voltage_step = MAX_VOLTAGE;
+            while (fabs(current_y - setpoint) > tolerance) {
+                current_output_voltage_step--;
+                set_pwm_dac(current_output_voltage_step);
+                current_y = read_voltage();
+
+                if (current_output_voltage_step == MIN_VOLTAGE) {
+                    printf("Setpoint not reachable\n");
+                    for (;;){}
+                    //break;
+                }
+        }
+    }
+
+    else if (current_output_voltage_step >= MAX_VOLTAGE) {
+        current_output_voltage_step = MIN_VOLTAGE;
+            while (fabs(current_y - setpoint) > tolerance) {
+                current_output_voltage_step++;
+                set_pwm_dac(current_output_voltage_step);
+                current_y = read_voltage();
+
+                if (current_output_voltage_step == MAX_VOLTAGE) {
+                    printf("Setpoint not reachable\n");
+                    for(;;){}
+                    //break;
+                }
+        }
+    }
+}
+
+void process_quad() {
+    size_t step_count = 0;
+    float current_y = 0.0 ;
+    current_y = read_voltage();
+    float difference = fabs(current_y - quad_setpoint);
+    printf("process_quad: Difference: %.4f V\n", difference);
+
+    // Iterate until the difference is within the tolerance
+    while (difference > tolerance) {
+        // Move the index depending on whether the value is increasing or decreasing
+        
+        if (current_y > quad_setpoint) {
+            current_output_voltage_step++; //originally --
+            //printf("++\n");
+        }
+
+        
+        else {
+            current_output_voltage_step--; //originally ++
+            //printf("--\n");
+        }
+
+        //Handle edge case 
+        if (current_output_voltage_step <= MIN_VOLTAGE_STEP || current_output_voltage_step >= MAX_VOLTAGE_STEP) {
+            handleEdgeCase(quad_setpoint, tolerance);
+            //current_y = SineWaveData::adc_read();
+        }
+
+        // Update DAC and read new value
+        set_pwm_dac(current_output_voltage_step);
+        current_y = read_voltage();
+        float difference = fabs(current_y - quad_setpoint);
+
+        step_count++;
+    }
+
+    printf("Broken out while loop\n");
+
+}
 
 int main()
 {
@@ -340,6 +418,19 @@ int main()
     //Initialize hardware
     initialize_pwm();
     initialize_adc();
+
+    sweep();
+    go_to_setpoint();
+
+    while(1) {
+        process_quad();
+        sleep_ms(100);
+    }
+
+
+
+
+
 
 
 /*
@@ -351,23 +442,30 @@ int main()
         sleep_ms(100);  // Delay for 100 ms
     }
 */
-    while(1) {
+   
         
-        scanPWM();
+        
         
         //peak_voltage = peak_voltage * 16;
         //null_voltage = null_voltage * 16;
 
+/*
         for (;;) {
             
+            //sweep();
             go_to_setpoint();
+
             //set_pwm_dac(null_voltage);
 
             //printf("%d Index\n", current_voltage);
             //printf("%.4f V\n", quad_setpoint);
 
+            
+            //sleep_ms(1000);
             sleep_ms(10000);
-        }
+            set_pwm_dac(MIN_VOLTAGE_STEP);
+*/
+        
     }
-}
+
 
