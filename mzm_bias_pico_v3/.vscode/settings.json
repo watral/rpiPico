@@ -35,23 +35,5 @@
     "raspberry-pi-pico.cmakeAutoConfigure": true,
     "raspberry-pi-pico.useCmakeTools": false,
     "raspberry-pi-pico.cmakePath": "${HOME}/.pico-sdk/cmake/v3.29.9/bin/cmake",
-    "raspberry-pi-pico.ninjaPath": "${HOME}/.pico-sdk/ninja/v1.12.1/ninja",
-    "files.associations": {
-        "atomic": "c",
-        "bit": "c",
-        "cctype": "c",
-        "cmath": "c",
-        "compare": "c",
-        "concepts": "c",
-        "cstdarg": "c",
-        "cstdint": "c",
-        "cstdio": "c",
-        "cstdlib": "c",
-        "type_traits": "c",
-        "limits": "c",
-        "new": "c",
-        "*.tcc": "c",
-        "cinttypes": "c",
-        "typeinfo": "c"
-    }
+    "raspberry-pi-pico.ninjaPath": "${HOME}/.pico-sdk/ninja/v1.12.1/ninja"
 }

@@ -31,15 +31,18 @@ enum setPoint set_point = QUAD_POINT;
 
 
 //Modify these
-const float tolerance           = 0.05f;             //Tolerance for reaching setpoint
+const float tolerance           = 0.01f;             //Tolerance for reaching setpoint
 const int average_per_read      = 1;                //Amount of averaged ADC reads per single ADC read
 const int array_size            = MAX_12BIT_STEPS;  //Array size for sweep_pwm
 
 //Initializing variable
-float null_setpoint             = 0; 
-float peak_setpoint             = 0;
-float quad_setpoint             = 0;
+float null_setpoint             = 0.0f; 
+float peak_setpoint             = 0.0f;
+float quad_setpoint             = 0.0f;
+float selected_setpoint         = 0.0f;
+float current_input_voltage     = 0.0f;
 int current_output_voltage_step = 0;
+
 
 //Unused values thus far
 //int null_voltage          = 0;
@@ -185,24 +188,22 @@ void detect_quad() {
 
 //TODO: FIX THIS CODE
 void go_to_setpoint() {
-    float setpoint    = 0.0f;
     float read        = 0.0f;
     float difference  = 0.0f;
     int voltage_step  = 0;
     int step_size     = MAX_16BIT_STEPS / MAX_12BIT_STEPS; //Use 12-bit step size for faster convergence, Use step_size of 1 for greater tighter tolerance but slower speed
     
+
+    //DEBUG
     if (set_point == PEAK_POINT) {
-        setpoint = peak_setpoint;
         printf("GO TO PEAK\n");
     }
 
     else if (set_point == QUAD_POINT) {
-        setpoint = quad_setpoint;
         printf("GO TO QUAD\n");
     }
 
     else if (set_point == NULL_POINT) {
-        setpoint = null_setpoint;
         printf("GO TO NULL\n");
     }
 
@@ -218,7 +219,7 @@ void go_to_setpoint() {
         
     voltage_step++;
 
-    difference = fabs(read - setpoint);
+    difference = fabs(read - selected_setpoint);
     printf("DIFFERENCE %.4f V\n", difference);
     
 //potential issue here with null point and tolerance value 
@@ -235,7 +236,7 @@ void go_to_setpoint() {
         
         set_pwm_dac(voltage_step);
         read = read_voltage();
-        difference = fabs(read - setpoint);
+        difference = fabs(read - selected_setpoint);
         voltage_step += step_size;
         //printf("VOLTAGE STWP %d \n", voltage_step);
     }
@@ -337,15 +338,20 @@ void sweep() {
 
 }
 
-void handleEdgeCase(double setpoint, double tolerance) {
-    float current_y = 0.0f;
+void handle_edge_case() {
+    float read = 0.0f;
     
     if (current_output_voltage_step <= MIN_VOLTAGE) {
         current_output_voltage_step = MAX_VOLTAGE;
-            while (fabs(current_y - setpoint) > tolerance) {
+        
+        set_pwm_dac(current_output_voltage_step);
+        sleep_ms(100); //allow DAC to settle 
+        read = read_voltage();
+            
+            while (fabs(read - selected_setpoint) > tolerance) {
                 current_output_voltage_step--;
                 set_pwm_dac(current_output_voltage_step);
-                current_y = read_voltage();
+                read = read_voltage();
 
                 if (current_output_voltage_step == MIN_VOLTAGE) {
                     printf("Setpoint not reachable\n");
@@ -357,10 +363,15 @@ void handleEdgeCase(double setpoint, double tolerance) {
 
     else if (current_output_voltage_step >= MAX_VOLTAGE) {
         current_output_voltage_step = MIN_VOLTAGE;
-            while (fabs(current_y - setpoint) > tolerance) {
+        
+        set_pwm_dac(current_output_voltage_step);
+        sleep_ms(100); //allow DAC to settle 
+        read = read_voltage();
+   
+            while (fabs(read - selected_setpoint) > tolerance) {
                 current_output_voltage_step++;
                 set_pwm_dac(current_output_voltage_step);
-                current_y = read_voltage();
+                read = read_voltage();
 
                 if (current_output_voltage_step == MAX_VOLTAGE) {
                     printf("Setpoint not reachable\n");
@@ -372,39 +383,48 @@ void handleEdgeCase(double setpoint, double tolerance) {
 }
 
 void process_quad() {
-    size_t step_count = 0;
-    float current_y = 0.0 ;
-    current_y = read_voltage();
-    float difference = fabs(current_y - quad_setpoint);
-    printf("process_quad: Difference: %.4f V\n", difference);
+    float read = 0.0f;
+    float difference = 0.0f;
+    int gain = 8;
+    
+    difference = fabs(current_input_voltage - selected_setpoint);
 
     // Iterate until the difference is within the tolerance
     while (difference > tolerance) {
         // Move the index depending on whether the value is increasing or decreasing
         
-        if (current_y > quad_setpoint) {
-            current_output_voltage_step++; //originally --
+        if (current_input_voltage > selected_setpoint) {
+            //current_output_voltage_step++; //originally --
+            current_output_voltage_step += gain;
+            set_pwm_dac(current_output_voltage_step);
+            //sleep_ms(10);
+            current_input_voltage = read_voltage();
             //printf("++\n");
         }
 
         
         else {
-            current_output_voltage_step--; //originally ++
+            //current_output_voltage_step--; //originally ++
+            current_output_voltage_step -= gain;
+            set_pwm_dac(current_output_voltage_step);
+            //sleep_ms(10);
+            current_input_voltage = read_voltage();
             //printf("--\n");
         }
 
         //Handle edge case 
         if (current_output_voltage_step <= MIN_VOLTAGE_STEP || current_output_voltage_step >= MAX_VOLTAGE_STEP) {
-            handleEdgeCase(quad_setpoint, tolerance);
+            handle_edge_case();
             //current_y = SineWaveData::adc_read();
+            printf("EDGE CASE\n");
+            for (;;) {
+
+            }
         }
 
-        // Update DAC and read new value
-        set_pwm_dac(current_output_voltage_step);
-        current_y = read_voltage();
-        float difference = fabs(current_y - quad_setpoint);
+        difference = fabs(current_input_voltage - selected_setpoint);
+        printf("difference: %.4f\n", difference);
 
-        step_count++;
     }
 
     printf("Broken out while loop\n");
@@ -420,11 +440,47 @@ int main()
     initialize_adc();
 
     sweep();
+
+    if (set_point == PEAK_POINT) {
+        selected_setpoint = peak_setpoint;
+        printf("GO TO PEAK\n");
+    }
+
+    else if (set_point == QUAD_POINT) {
+        selected_setpoint = quad_setpoint;
+        printf("GO TO QUAD\n");
+    }
+
+    else if (set_point == NULL_POINT) {
+        selected_setpoint = null_setpoint;
+        printf("GO TO NULL\n");
+    }
+
     go_to_setpoint();
 
+
     while(1) {
-        process_quad();
-        sleep_ms(100);
+        
+        current_input_voltage = read_voltage();
+
+        if (fabs(current_input_voltage - selected_setpoint) > tolerance) {
+            
+            //DEBUG
+            printf("Process_quad\n");
+            process_quad();
+            sleep_ms(1000);
+        }
+
+        else {
+            
+            //DEBUG
+            printf("Setpoint in limit\n");
+            printf("%.4f\n", current_input_voltage);
+            sleep_ms(1000);
+        }
+
+        //process_quad();
+        //sleep_ms(100);
     }
 
 
