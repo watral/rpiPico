@@ -419,7 +419,6 @@ void processPeakSetpoint() {
               << ") after " << steps << " steps." << std::endl;
 }
 
-//TODO: use previous logic to adjust current index update, slope tracking (always go in direction of negative slope)
 void processNullSetpoint() {
     size_t steps = 0;
     const double tolerance = 0.0001;
