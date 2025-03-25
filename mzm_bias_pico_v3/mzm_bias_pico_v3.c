@@ -13,7 +13,7 @@ enum setPoint {
     PEAK_POINT   
 };
 
-enum setPoint set_point = NULL_POINT;
+enum setPoint set_point = QUAD_POINT;
 
 #define PWM_PIN                   15                 //GPIO 11
 #define ADC_INPUT                 0                  //GPIO 26
@@ -30,7 +30,7 @@ enum setPoint set_point = NULL_POINT;
 #define GAIN                      8
 
 //Modify these
-const float tolerance           = 0.01f;             //Tolerance for reaching setpoint
+const float tolerance           = 0.0032f;             //Tolerance for reaching setpoint
 const int average_per_read      = 4000;                 //Amount of averaged ADC reads per single ADC read
 const int array_size            = MAX_12BIT_STEPS;   //Array size for sweep_pwm
 
@@ -463,8 +463,6 @@ float move(int voltage_step)
     return read_voltage();
 }
 
-
-
 void process_peak()
 {
     //CURRENT_OUTPUT_VOLTAGE_STEP UPDATED EACH 
@@ -577,7 +575,9 @@ bool process_slope_null()
 void process_null() 
 {
     float difference = 0.0f;
+    float prev_difference = 0.0;
     float read = 0.0f;
+    int j = 0;
 
     difference = fabs(selected_setpoint - current_input_voltage);
     
@@ -595,7 +595,31 @@ void process_null()
                 read = move(current_output_voltage_step - GAIN); 
             }
 
+        if (j == 0)
+        {
+            prev_difference = difference;
+        }
+
         difference = fabs(selected_setpoint - read);
+
+        if (difference > prev_difference)
+        {
+            j++;
+            printf("J\n");
+            
+            if ((direction == MOVE_RIGHT) && (j == 50))
+            {
+                direction = MOVE_LEFT;
+                j = 0;
+            }
+
+            else if ((direction == MOVE_LEFT) && (j == 50))
+            {
+                direction = MOVE_RIGHT;
+                j = 0;
+                
+            }
+        }
         printf("difference = %.4f\n", difference);
 
     }
@@ -636,6 +660,14 @@ int main()
     go_to_setpoint();
 
 /*
+    //test
+    sleep_ms(5000);
+    set_pwm_dac(current_output_voltage_step + 5000);
+    sleep_ms(5000);
+*/
+
+/*
+
     // Timer countdown for 5 minutes (300 seconds)
     uint32_t countdown_time = 300; // 5 minutes in seconds
 
@@ -646,7 +678,9 @@ int main()
     }
 
     printf("Timer complete!\n");
+
 */
+
 
 
     while(1) 
