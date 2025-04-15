@@ -2,6 +2,8 @@ Test description:
 
 initial setup probing laser after sending backwards through MZM
 
+laser_1 -> circulator -> mzm <- circulator <- laser_2
+
 power measurments in text files for each test,
 
 done for multiple frequencies

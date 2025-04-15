@@ -2,6 +2,8 @@ Test description:
 
 initial setup laser->mzm->pwr meter
 
-power measurments need to be re-done
-
 test shows that rf energy changes the shape of the transfer function and is a problem
+
+power measurments are not accurate as uncalibrated spectrum analyzer was used, but gives an accurate relative measurment to eachother
+
+RF IN: 1GHz
