@@ -5,15 +5,34 @@
 #include "hardware/pwm.h"
 #include "hardware/adc.h"
 
-//TODO: Logging, Peak Bias, Null Bias
+//TODO: BUTTON RESWEEP, SWITCH SELECT QUAD_PLUS/NULL OR QUAD_PLUS/PEAK, POTENTIAL EDGE CASE HANDELING
+
+/*
+SUGGESTED RANGE FOR MODIFIED VARIABLES/ORIGINAL VALUES
+
+TOLERANCE: 0.0032 -> 0.1 : ORIGINAL VALUE 0.0064 : CHANGE FOR GREATER CONTROL LOOP ACCURACY, DECREASE FOR HIGHER ACCURACY, INCREASE FOR NOISE MITIGATION
+QUAD_BUFFER: 5 -> 100    : ORIGINAL VALUE 10     : INCREASE THIS VALUE IF WRONG QUAD (+/-) IS FOUND AFTER SWEEP, DECREASE THIS VALUE IF QUAD IS NOT FOUND AT ALL
+NULL_BUFFER: 25 -> 500   : ORIGINAL VALUE 200    : INCREASE THIS VALUE IF NULL DOESNT SETTLE, DECREASE THIS VALUE IF THERE IS TO MUCH NOISE WHILE NULL LOCKED 
+PEAK_BUFFER: 25 -> 500   : ORIGINAL VALUE 200    : SAME AS ABOVE BUT FOR PEAK
+GAIN: 8->32              : ORIGINAL VALUE 8      : NOT ADVISED TO CHANGE, INCREASE FOR FASTER CONVERGENCE TIME TO SETPOINT
+*/
+
+//MODIFY THESE--------------------------------------------------------------------------------------------------------------------------------------------------------
+const float tolerance           = 0.0064f;              //Tolerance for reaching setpoint in volts. 
+const int quad_buffer           = 10;                   //Buffer for quad + / - search. Requires x # of measurments that fall within tolerance and slope conditions before it is deemed valid. Mitigates noise
+const int peak_buffer           = 200;                  //Buffer for peak control loop. Requires x # of measurments with growing error before changing direction. Mitigates noise
+const int null_buffer           = 200;                  //Same as above but for null
+#define GAIN                      8                     //Gain of overall control loop. At each calculation DAC will correct x amount of voltage steps. Change not recommended.
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 enum setPoint {
     NULL_POINT,
-    QUAD_POINT, 
+    QUAD_MINUS,
+    QUAD_PLUS, 
     PEAK_POINT   
 };
 
-enum setPoint set_point = QUAD_POINT;
+enum setPoint set_point = PEAK_POINT;
 
 #define PWM_PIN                   15                 //GPIO 11
 #define ADC_INPUT                 0                  //GPIO 26
@@ -27,12 +46,10 @@ enum setPoint set_point = QUAD_POINT;
 #define MAX_16BIT_STEPS           65536              //Max value for 16-bit 
 #define MOVE_RIGHT                1
 #define MOVE_LEFT                 0
-#define GAIN                      8
 
-//Modify these
-const float tolerance           = 0.0032f;             //Tolerance for reaching setpoint
+
 const int average_per_read      = 4000;                 //Amount of averaged ADC reads per single ADC read
-const int array_size            = MAX_12BIT_STEPS;   //Array size for sweep_pwm
+const int array_size            = MAX_12BIT_STEPS;      //Array size for sweep_pwm
 
 //Initializing variable
 float null_setpoint             = 0.0f; 
@@ -81,9 +98,13 @@ void log_selected_setpoint()
     {
         printf("SELECTED SETPOINT: PEAK\n");
     }
-    else if (set_point == QUAD_POINT) 
+    else if (set_point == QUAD_PLUS) 
     {
-        printf("SELECTED SETPOINT: QUAD\n");
+        printf("SELECTED SETPOINT: QUAD PLUS\n");
+    }
+    else if (set_point == QUAD_MINUS) 
+    {
+        printf("SELECTED SETPOINT: QUAD MINUS\n");
     }
     else if (set_point == NULL_POINT) 
     {
@@ -351,6 +372,516 @@ void go_to_setpoint()
     
 }
 
+void go_to_quad_plus() 
+{
+    float read        = 0.0f;
+    float difference  = 0.0f;
+    float prev_read   = 0.0f;
+    int voltage_step  = 0;
+    int step_size     = MAX_16BIT_STEPS / MAX_12BIT_STEPS; //Use 12-bit step size for faster convergence
+    int buffer        = 0;
+    
+    log_selected_setpoint();
+
+    set_pwm_dac(voltage_step); 
+    
+    sleep_ms(100); //Allow DAC to settle (REASON: PWM signal from MAX voltage to MIN voltage takes some time to settle through the external RC circuit)
+
+    read = read_voltage();
+ 
+    voltage_step++;
+
+    difference = fabs(read - selected_setpoint);
+
+    bool is_plus = false;
+
+    while ((difference > tolerance) && (is_plus == false)) 
+    { 
+        
+        //Ensure voltage values stay within limits
+        if (voltage_step < MIN_VOLTAGE_STEP) 
+        {
+            log_index_error(voltage_step);
+            break;
+        }
+
+        if (voltage_step > MAX_VOLTAGE_STEP) 
+        {  
+            log_index_error(voltage_step);
+            break;
+        }
+
+        if((prev_read < read) && (difference > tolerance))
+        {
+            buffer++;
+
+            if (buffer > quad_buffer)
+            {
+                is_plus = true;
+            }
+        }
+        
+        //Keep adjusting output until setpoint is reached
+        set_pwm_dac(voltage_step);
+        read = read_voltage();
+        difference = fabs(read - selected_setpoint);
+        voltage_step += step_size;
+        prev_read = read;
+    }
+
+    log_setpoint_reached(read, difference);
+    
+}
+
+void go_to_quad_minus() 
+{
+    float read        = 0.0f;
+    float difference  = 0.0f;
+    float prev_read   = 0.0f;
+    int voltage_step  = 0;
+    int step_size     = MAX_16BIT_STEPS / MAX_12BIT_STEPS; //Use 12-bit step size for faster convergence
+    int buffer        = 0;
+    
+    log_selected_setpoint();
+
+    set_pwm_dac(voltage_step); 
+    
+    sleep_ms(100); //Allow DAC to settle (REASON: PWM signal from MAX voltage to MIN voltage takes some time to settle through the external RC circuit)
+
+    read = read_voltage();
+ 
+    voltage_step++;
+
+    difference = fabs(read - selected_setpoint);
+
+    bool is_minus = false;
+
+    while ((difference > tolerance) && (is_minus == false)) 
+    { 
+        
+        //Ensure voltage values stay within limits
+        if (voltage_step < MIN_VOLTAGE_STEP) 
+        {
+            log_index_error(voltage_step);
+            break;
+        }
+
+        if (voltage_step > MAX_VOLTAGE_STEP) 
+        {  
+            log_index_error(voltage_step);
+            break;
+        }
+
+        if((prev_read > read) && (difference > tolerance))
+        {
+            buffer++;
+
+            if (buffer > quad_buffer)
+            {
+                is_minus = true;
+            }
+        }
+        
+        //Keep adjusting output until setpoint is reached
+        set_pwm_dac(voltage_step);
+        read = read_voltage();
+        difference = fabs(read - selected_setpoint);
+        voltage_step += step_size;
+        prev_read = read;
+    }
+
+    log_setpoint_reached(read, difference);
+    
+}
+
+void process_quad_minus() {
+    float read = 0.0f;
+    float difference = 0.0f;
+    int gain = 8;
+    
+    difference = fabs(current_input_voltage - selected_setpoint);
+
+    // Iterate until the difference is within the tolerance
+    while (difference > tolerance) 
+    {
+        // Move the index depending on whether the value is increasing or decreasing
+        
+        if (current_input_voltage > selected_setpoint) 
+        {
+            
+            current_output_voltage_step += gain;
+            set_pwm_dac(current_output_voltage_step);
+            current_input_voltage = read_voltage();
+
+        }
+   
+        else 
+        {
+            
+            current_output_voltage_step -= gain;
+            set_pwm_dac(current_output_voltage_step);
+            current_input_voltage = read_voltage();
+
+        }
+
+        //Handle edge case 
+        if (current_output_voltage_step <= MIN_VOLTAGE_STEP || current_output_voltage_step >= MAX_VOLTAGE_STEP) 
+        {
+            go_to_quad_minus();
+            printf("EDGE CASE\n");
+            
+        }
+
+        difference = fabs(current_input_voltage - selected_setpoint);
+        printf("Difference:      %.4f\n", difference);
+
+    }
+
+    printf("\n");
+
+}
+
+void process_quad_plus() {
+    float read = 0.0f;
+    float difference = 0.0f;
+    int gain = 8;
+    
+    difference = fabs(current_input_voltage - selected_setpoint);
+
+    // Iterate until the difference is within the tolerance
+    while (difference > tolerance) 
+    {
+        // Move the index depending on whether the value is increasing or decreasing
+        
+        if (current_input_voltage > selected_setpoint) 
+        {
+            
+            current_output_voltage_step -= gain;
+            set_pwm_dac(current_output_voltage_step);
+            current_input_voltage = read_voltage();
+
+        }
+   
+        else if (current_input_voltage < selected_setpoint)
+        {
+            
+            current_output_voltage_step += gain;
+            set_pwm_dac(current_output_voltage_step);
+            current_input_voltage = read_voltage();
+
+        }
+
+        //Handle edge case 
+        if (current_output_voltage_step <= MIN_VOLTAGE_STEP || current_output_voltage_step >= MAX_VOLTAGE_STEP) 
+        {
+            go_to_quad_plus();
+            printf("EDGE CASE\n");
+            
+        }
+
+        difference = fabs(current_input_voltage - selected_setpoint);
+        printf("Difference:      %.4f\n", difference);
+
+    }
+
+    printf("\n");
+
+}
+
+float move(int voltage_step) 
+{
+    set_pwm_dac(voltage_step);
+    return read_voltage();
+}
+
+bool process_slope_peak()
+{
+
+    bool move_right = MOVE_RIGHT;
+    bool move_left = MOVE_LEFT;
+
+    int initial_output_voltage_step = 0;
+    int i = 1; //This value keeps tracks of read in the case that the initial read equals the next read
+
+    float initial_read = 0.0f;
+    float next_read = 0.0f;
+
+    initial_output_voltage_step = current_output_voltage_step;
+    
+    initial_read = current_input_voltage;
+    next_read = move(initial_output_voltage_step + GAIN);
+
+    while (initial_read == next_read)
+    {
+        next_read = move(current_output_voltage_step + GAIN);
+        i++;
+        printf("i: %d\n", i);
+    }
+
+    if (initial_read > next_read)
+    {
+        return move_left;
+    }
+
+    else if (initial_read < next_read)
+    {
+        move(initial_output_voltage_step - (i*GAIN));
+        return move_right;
+    }
+
+}
+
+void process_peak()
+{
+    float difference = 0.0f;
+    float prev_difference = 0.0;
+    float read = 0.0f;
+    int buffer = 0;
+
+    difference = fabs(selected_setpoint - current_input_voltage);
+    
+    bool direction = process_slope_peak();
+
+    while (difference > tolerance)
+    {
+        if (direction == MOVE_RIGHT)
+            {
+                read = move(current_output_voltage_step + GAIN); 
+            }
+
+        else if (direction == MOVE_LEFT)
+            {
+                read = move(current_output_voltage_step - GAIN); 
+            }
+
+        if (buffer == 0)
+        {
+            prev_difference = difference;
+        }
+
+        difference = fabs(selected_setpoint - read);
+
+        if (difference > prev_difference)
+        {
+            buffer++;
+            printf("J\n");
+            
+            if ((direction == MOVE_RIGHT) && (buffer == peak_buffer))
+            {
+                direction = MOVE_LEFT;
+                buffer = 0;
+            }
+
+            else if ((direction == MOVE_LEFT) && (buffer == peak_buffer))
+            {
+                direction = MOVE_RIGHT;
+                buffer = 0;
+                
+            }
+        }
+        printf("difference = %.4f\n", difference);
+
+        if (current_output_voltage_step <= MIN_VOLTAGE_STEP || current_output_voltage_step >= MAX_VOLTAGE_STEP) 
+        {
+            go_to_setpoint();
+            printf("EDGE CASE\n");
+            
+        }
+
+    }
+
+}
+
+bool process_slope_null()
+{
+
+    bool move_right = MOVE_RIGHT;
+    bool move_left = MOVE_LEFT;
+
+    int initial_output_voltage_step = 0;
+    int i = 1;
+
+    float initial_read = 0.0f;
+    float next_read = 0.0f;
+
+    initial_output_voltage_step = current_output_voltage_step;
+    
+    initial_read = current_input_voltage;
+    next_read = move(initial_output_voltage_step + GAIN);
+
+    while (initial_read == next_read)
+    {
+        next_read = move(current_output_voltage_step + GAIN);
+        i++;
+        printf("i: %d\n", i);
+    }
+
+    if (initial_read > next_read)
+    {
+        return move_right;
+    }
+
+    else if (initial_read < next_read)
+    {
+        move(initial_output_voltage_step - (i*GAIN));
+        return move_left;
+    }
+
+}
+
+void process_null() 
+{
+    float difference = 0.0f;
+    float prev_difference = 0.0;
+    float read = 0.0f;
+    int buffer = 0;
+
+    difference = fabs(selected_setpoint - current_input_voltage);
+    
+    bool direction = process_slope_null();
+
+    while (difference > tolerance)
+    {
+        if (direction == MOVE_RIGHT)
+            {
+                read = move(current_output_voltage_step + GAIN); 
+            }
+
+        else if (direction == MOVE_LEFT)
+            {
+                read = move(current_output_voltage_step - GAIN); 
+            }
+
+        if (buffer == 0)
+        {
+            prev_difference = difference;
+        }
+
+        difference = fabs(selected_setpoint - read);
+
+        if (difference > prev_difference)
+        {
+            buffer++;
+            printf("J\n");
+            
+            if ((direction == MOVE_RIGHT) && (buffer == null_buffer))
+            {
+                direction = MOVE_LEFT;
+                buffer = 0;
+            }
+
+            else if ((direction == MOVE_LEFT) && (buffer == null_buffer))
+            {
+                direction = MOVE_RIGHT;
+                buffer = 0;
+                
+            }
+        }
+        printf("difference = %.4f\n", difference);
+
+        if (current_output_voltage_step <= MIN_VOLTAGE_STEP || current_output_voltage_step >= MAX_VOLTAGE_STEP) 
+        {
+            go_to_setpoint();
+            printf("EDGE CASE\n");
+            
+        }
+
+    }
+
+}
+
+int main()
+{
+    stdio_init_all();
+    
+    //Initialize hardware
+    initialize_pwm();
+    initialize_adc();
+
+    //sleep_ms(10000); //This is only used if logging data to open putty up in time
+    sweep();
+
+    if (set_point == PEAK_POINT) 
+    {
+        selected_setpoint = peak_setpoint;
+        go_to_setpoint();
+    }
+
+    else if (set_point == QUAD_PLUS)
+    {
+        selected_setpoint = quad_setpoint;
+        go_to_quad_plus();
+    }
+
+    else if (set_point == QUAD_MINUS)
+    {
+        selected_setpoint = quad_setpoint;
+        go_to_quad_minus();
+    }
+
+    else if (set_point == NULL_POINT) 
+    {
+        selected_setpoint = null_setpoint;
+        go_to_setpoint();
+    }
+
+    while(1) 
+    
+    {
+        
+        current_input_voltage = read_voltage();
+
+        if (fabs(current_input_voltage - selected_setpoint) > tolerance) 
+        
+        {
+            
+            //DEBUG
+            printf("Process_setpoint     \n");
+            printf("Current input voltage %.4f\n", current_input_voltage);
+           
+            if (set_point == PEAK_POINT)
+            {
+                process_peak();
+            }
+
+            else if (set_point == QUAD_PLUS)
+            {
+                process_quad_plus();
+            }
+
+            else if (set_point == QUAD_MINUS)
+            {
+                process_quad_minus();
+            }
+
+            else if (set_point == NULL_POINT)
+            {
+                process_null();
+            }
+
+            sleep_ms(1000); //Reason: readable output and control stability 
+
+        }
+
+        else 
+       
+        {
+
+            //DEBUG
+            printf("Setpoint in limit\n");
+            printf("Input Voltage:   %.4f\n", current_input_voltage);
+            sleep_ms(1000);
+
+        }
+    
+    }   
+}
+
+
+//UNUSED CODE
+
+
+/*
 void handle_edge_case() 
 {
     printf("Current output voltage step %d:\n", current_output_voltage_step);
@@ -361,7 +892,7 @@ void handle_edge_case()
         current_output_voltage_step = MAX_VOLTAGE;
         
         set_pwm_dac(current_output_voltage_step);
-        sleep_ms(1000);
+        sleep_ms(1000); 
         current_input_voltage = read_voltage();
 
             //Keep adjusting output voltage until setpoint is reached again    
@@ -410,325 +941,4 @@ void handle_edge_case()
     }
 }
 
-void process_quad() {
-    float read = 0.0f;
-    float difference = 0.0f;
-    int gain = 8;
-    
-    difference = fabs(current_input_voltage - selected_setpoint);
-
-    // Iterate until the difference is within the tolerance
-    while (difference > tolerance) 
-    {
-        // Move the index depending on whether the value is increasing or decreasing
-        
-        if (current_input_voltage > selected_setpoint) 
-        {
-            
-            current_output_voltage_step += gain;
-            set_pwm_dac(current_output_voltage_step);
-            current_input_voltage = read_voltage();
-
-        }
-   
-        else 
-        {
-            
-            current_output_voltage_step -= gain;
-            set_pwm_dac(current_output_voltage_step);
-            current_input_voltage = read_voltage();
-
-        }
-
-        //Handle edge case 
-        if (current_output_voltage_step <= MIN_VOLTAGE_STEP || current_output_voltage_step >= MAX_VOLTAGE_STEP) 
-        {
-            handle_edge_case();
-            printf("EDGE CASE\n");
-            
-        }
-
-        difference = fabs(current_input_voltage - selected_setpoint);
-        printf("Difference:      %.4f\n", difference);
-
-    }
-
-    printf("\n");
-
-}
-
-float move(int voltage_step) 
-{
-    set_pwm_dac(voltage_step);
-    return read_voltage();
-}
-
-void process_peak()
-{
-    //CURRENT_OUTPUT_VOLTAGE_STEP UPDATED EACH 
-    //float current_read = 0.0f;
-    float initial_read = 0.0f;
-    float next_read = 0.0f;
-    float difference = 0.0f;
-    
-    int gain = 8;
-    int initial_write = 0;
-    int next_write = 0;
-    
-
-    bool move_down = false;
-    bool move_up = false;
-
-    difference = fabs(selected_setpoint - current_input_voltage);
-
-    printf("Difference: %.4f\n", difference);
-    
-    initial_write = current_output_voltage_step;
-    initial_read = current_input_voltage;
-    printf("initial write: %d\n", initial_write);
-    printf("initial read: %.4f\n", initial_read);
-    
-    next_write = current_output_voltage_step + (100*gain);
-    next_read = move(next_write);
-    printf("next write: %d\n", next_write);
-    printf("next read: %.4f\n", next_read);
-
-    if (next_read > initial_read) 
-    {
-        move_up = true;
-        printf("Value of move right = %d\n", move_up);
-    }
-
-    else if (next_read < initial_read)
-    {
-        move_down = true; 
-        printf("Value of move left = %d\n", move_down);
-    }
-
-    else 
-    {
-        printf("ERROR\n");
-    }
-
-    current_output_voltage_step = initial_write;
-
-    while (difference > tolerance) 
-    {
-            if (move_up == true) 
-            {
-                current_input_voltage = move(current_output_voltage_step + gain);
-            } 
-            else if (move_down == true) 
-            {
-                current_input_voltage = move(current_output_voltage_step - gain);
-            }
-
-            difference = fabs(selected_setpoint - current_input_voltage);
-            
-        //Handle edge case 
-        if (current_output_voltage_step <= MIN_VOLTAGE_STEP || current_output_voltage_step >= MAX_VOLTAGE_STEP)
-        {
-            //printf("input voltage: %.4f\n", current_input_voltage);
-            printf("EDGE CASE \n");
-            handle_edge_case();
-        }
-    }
-}
-
-bool process_slope_null()
-{
-
-    bool move_right = MOVE_RIGHT;
-    bool move_left = MOVE_LEFT;
-
-    int initial_output_voltage_step = 0;
-    int i = 1;
-
-    float initial_read = 0.0f;
-    float next_read = 0.0f;
-
-    initial_output_voltage_step = current_output_voltage_step;
-    
-    initial_read = current_input_voltage;
-    next_read = move(initial_output_voltage_step + GAIN);
-
-    while (initial_read == next_read)
-    {
-        next_read = move(current_output_voltage_step + GAIN);
-        i++;
-        printf("i: %d\n", i);
-    }
-
-    if (initial_read > next_read)
-    {
-        return move_right;
-    }
-
-    else if (initial_read < next_read)
-    {
-        move(initial_output_voltage_step - (i*GAIN));
-        return move_left;
-    }
-
-}
-
-void process_null() 
-{
-    float difference = 0.0f;
-    float prev_difference = 0.0;
-    float read = 0.0f;
-    int j = 0;
-
-    difference = fabs(selected_setpoint - current_input_voltage);
-    
-    bool direction = process_slope_null();
-
-    while (difference > tolerance)
-    {
-        if (direction == MOVE_RIGHT)
-            {
-                read = move(current_output_voltage_step + GAIN); 
-            }
-
-        else if (direction == MOVE_LEFT)
-            {
-                read = move(current_output_voltage_step - GAIN); 
-            }
-
-        if (j == 0)
-        {
-            prev_difference = difference;
-        }
-
-        difference = fabs(selected_setpoint - read);
-
-        if (difference > prev_difference)
-        {
-            j++;
-            printf("J\n");
-            
-            if ((direction == MOVE_RIGHT) && (j == 50))
-            {
-                direction = MOVE_LEFT;
-                j = 0;
-            }
-
-            else if ((direction == MOVE_LEFT) && (j == 50))
-            {
-                direction = MOVE_RIGHT;
-                j = 0;
-                
-            }
-        }
-        printf("difference = %.4f\n", difference);
-
-    }
-
-    
-}
-
-//TODO: NULL: Difference tracking in case of noise, if the code says to go one way and the difference keeps increasing we know its going to wrong way due to noise when processing direction
-//PEAK/NULL: Sufficient edge case handling
-//PEAK: Implement the format of null to peak
-
-int main()
-{
-    stdio_init_all();
-    
-    //Initialize hardware
-    initialize_pwm();
-    initialize_adc();
-
-    //sleep_ms(10000); //This is only used if logging data to open putty up in time
-    sweep();
-
-    if (set_point == PEAK_POINT) 
-    {
-        selected_setpoint = peak_setpoint;
-    }
-
-    else if (set_point == QUAD_POINT)
-    {
-        selected_setpoint = quad_setpoint;
-    }
-
-    else if (set_point == NULL_POINT) 
-    {
-        selected_setpoint = null_setpoint;
-    }
-
-    go_to_setpoint();
-
-/*
-    //test
-    sleep_ms(5000);
-    set_pwm_dac(current_output_voltage_step + 5000);
-    sleep_ms(5000);
 */
-
-/*
-
-    // Timer countdown for 5 minutes (300 seconds)
-    uint32_t countdown_time = 300; // 5 minutes in seconds
-
-    while (countdown_time > 0) {
-        printf("%u seconds left\n", countdown_time);
-        sleep_ms(10000); // Sleep for 10 seconds
-        countdown_time -= 10; // Decrease countdown by 10 seconds
-    }
-
-    printf("Timer complete!\n");
-
-*/
-
-
-
-    while(1) 
-    
-    {
-        
-        current_input_voltage = read_voltage();
-
-        if (fabs(current_input_voltage - selected_setpoint) > tolerance) 
-        
-        {
-            
-            //DEBUG
-            printf("Process_setpoint     \n");
-            printf("Current input voltage %.4f\n", current_input_voltage);
-           
-            if (set_point == PEAK_POINT)
-            {
-                process_peak();
-            }
-
-            else if (set_point == QUAD_POINT)
-            {
-                process_quad();
-            }
-
-            else if (set_point == NULL_POINT)
-            {
-                process_null();
-            }
-
-            sleep_ms(1000); //Reason: DEBUG for readable output 
-
-        }
-
-        else 
-       
-        {
-
-            //DEBUG
-            printf("Setpoint in limit\n");
-            printf("Input Voltage:   %.4f\n", current_input_voltage);
-            sleep_ms(1000);
-
-        }
-    
-    }      
-
-}
-
-
