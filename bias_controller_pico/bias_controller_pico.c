@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <string.h>
 #include "pico/stdlib.h"
 #include "hardware/pwm.h"
 #include "hardware/adc.h"
@@ -10,7 +11,7 @@
 /*
 SUGGESTED RANGE FOR MODIFIED VARIABLES/ORIGINAL VALUES
 
-TOLERANCE: 0.0032 -> 0.1 : ORIGINAL VALUE 0.0064 : CHANGE FOR GREATER CONTROL LOOP ACCURACY, DECREASE FOR HIGHER ACCURACY, INCREASE FOR NOISE MITIGATION
+TOLERANCE: 0.0032 -> 0.1 : ORIGINAL VALUE 0.0064 QUAD, 0.05 PEAK/NULL : CHANGE FOR GREATER CONTROL LOOP ACCURACY, DECREASE FOR HIGHER ACCURACY, INCREASE FOR NOISE MITIGATION
 QUAD_BUFFER: 5 -> 100    : ORIGINAL VALUE 10     : INCREASE THIS VALUE IF WRONG QUAD (+/-) IS FOUND AFTER SWEEP, DECREASE THIS VALUE IF QUAD IS NOT FOUND AT ALL
 NULL_BUFFER: 25 -> 500   : ORIGINAL VALUE 200    : INCREASE THIS VALUE IF NULL DOESNT SETTLE, DECREASE THIS VALUE IF THERE IS TO MUCH NOISE WHILE NULL LOCKED 
 PEAK_BUFFER: 25 -> 500   : ORIGINAL VALUE 200    : SAME AS ABOVE BUT FOR PEAK
@@ -18,11 +19,11 @@ GAIN: 8->32              : ORIGINAL VALUE 8      : NOT ADVISED TO CHANGE, INCREA
 */
 
 //MODIFY THESE--------------------------------------------------------------------------------------------------------------------------------------------------------
-const float tolerance           = 0.0064f;              //Tolerance for reaching setpoint in volts. 
-const int quad_buffer           = 10;                   //Buffer for quad + / - search. Requires x # of measurments that fall within tolerance and slope conditions before it is deemed valid. Mitigates noise
-const int peak_buffer           = 200;                  //Buffer for peak control loop. Requires x # of measurments with growing error before changing direction. Mitigates noise
-const int null_buffer           = 200;                  //Same as above but for null
-#define GAIN                      8                     //Gain of overall control loop. At each calculation DAC will correct x amount of voltage steps. Change not recommended.
+float tolerance           = 0.05f;              //Tolerance for reaching setpoint in volts. 
+int quad_buffer           = 10;                   //Buffer for quad + / - search. Requires x # of measurments that fall within tolerance and slope conditions before it is deemed valid. Mitigates noise
+int peak_buffer           = 50;                  //Buffer for peak control loop. Requires x # of measurments with growing error before changing direction. Mitigates noise
+int null_buffer           = 50;                  //Same as above but for null
+#define GAIN                8                     //Gain of overall control loop. At each calculation DAC will correct x amount of voltage steps. Change not recommended.
 //--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 enum setPoint {
@@ -32,10 +33,25 @@ enum setPoint {
     PEAK_POINT   
 };
 
-enum setPoint set_point = PEAK_POINT;
+enum setPoint set_point = NULL_POINT;
 
-#define PWM_PIN                   15                 //GPIO 11
-#define ADC_INPUT                 0                  //GPIO 26
+// Serial command buffer
+#define MAX_CMD_LEN               100
+char cmd_buffer[MAX_CMD_LEN];
+int cmd_index = 0;
+bool cmd_ready = false;
+
+// Parameter change flags
+bool params_changed = false;
+
+#define PWM_PIN                   15                 //PIN 20
+#define BUTTON_PIN                14                 //PIN 19
+#define LED_PIN                   13
+#define NULL_PIN                  18
+#define QUAD_PLUS_PIN             19
+#define QUAD_MINUS_PIN            20
+#define PEAK_PIN                  21
+#define ADC_INPUT                 0                  //GPIO 26/PIN 31
 #define MAX_VOLTAGE_STEP          65535              //Maximum voltage step DAC
 #define MIN_VOLTAGE_STEP          0                  //Minimum voltage step DAC
 #define MAX_VOLTAGE               3.3f
@@ -59,9 +75,125 @@ float selected_setpoint         = 0.0f;
 float current_input_voltage     = 0.0f;
 int current_output_voltage_step = 0;
 
-
+volatile bool button_pressed = false;
+volatile bool null_pin = false;
+volatile bool quad_minus_pin = false;
+volatile bool quad_plus_pin = false;
+volatile bool peak_pin = false;
 //------------------------------------------------------------------------------------------------------------------
+// Serial command processing functions
+void process_command(char* cmd) {
+    char param_name[20];
+    float param_value;
+    
+    // Parse command for parameter updates
+    if (sscanf(cmd, "set %19s %f", param_name, &param_value) == 2) {
+        if (strcmp(param_name, "tolerance") == 0) {
+            if (param_value >= 0.0032f && param_value <= 0.1f) {
+                tolerance = param_value;
+                printf("Tolerance set to: %.4f V\n", tolerance);
+                params_changed = true;
+            } else {
+                printf("Invalid tolerance value. Range: 0.0032 to 0.1\n");
+            }
+        } 
+        else if (strcmp(param_name, "quad_buffer") == 0) {
+            if (param_value >= 5 && param_value <= 100) {
+                quad_buffer = (int)param_value;
+                printf("Quad buffer set to: %d\n", quad_buffer);
+                params_changed = true;
+            } else {
+                printf("Invalid quad_buffer value. Range: 5 to 100\n");
+            }
+        } 
+        else if (strcmp(param_name, "null_buffer") == 0) {
+            if (param_value >= 25 && param_value <= 500) {
+                null_buffer = (int)param_value;
+                printf("Null buffer set to: %d\n", null_buffer);
+                params_changed = true;
+            } else {
+                printf("Invalid null_buffer value. Range: 25 to 500\n");
+            }
+        } 
+        else if (strcmp(param_name, "peak_buffer") == 0) {
+            if (param_value >= 25 && param_value <= 500) {
+                peak_buffer = (int)param_value;
+                printf("Peak buffer set to: %d\n", peak_buffer);
+                params_changed = true;
+            } else {
+                printf("Invalid peak_buffer value. Range: 25 to 500\n");
+            }
+        } 
+        else {
+            printf("Unknown parameter: %s\n", param_name);
+        }
+    } 
+    else if (strcmp(cmd, "status") == 0) {
+        // Print current parameter values
+        printf("\n--- CURRENT PARAMETERS ---\n");
+        printf("Tolerance    : %.4f\n", tolerance);
+        printf("Quad Buffer  : %d\n", quad_buffer);
+        printf("Null Buffer  : %d\n", null_buffer);
+        printf("Peak Buffer  : %d\n", peak_buffer);
+        printf("Gain         : %d (fixed)\n", GAIN);
+        printf("------------------------\n\n");
+    } 
+    else if (strcmp(cmd, "help") == 0) {
+        printf("\n--- COMMAND HELP ---\n");
+        printf("set tolerance [value]    - Set tolerance (0.0032 to 0.1)\n");
+        printf("set quad_buffer [value]  - Set quad buffer (5 to 100)\n");
+        printf("set null_buffer [value]  - Set null buffer (25 to 500)\n");
+        printf("set peak_buffer [value]  - Set peak buffer (25 to 500)\n");
+        printf("status                   - Show current parameter values\n");
+        printf("sweep                    - Force a new sweep operation\n");
+        printf("help                     - Show this help menu\n");
+        printf("--------------------\n\n");
+    }
+    else if (strcmp(cmd, "sweep") == 0) {
+        printf("Initiating manual sweep...\n");
+        button_pressed = true;
+    }
+    else {
+        printf("Unknown command. Type 'help' for available commands.\n");
+    }
+}
 
+// Process any received characters and handle commands
+void check_serial_input() {
+    int c;
+    
+    // Non-blocking check for any available characters
+    while ((c = getchar_timeout_us(0)) != PICO_ERROR_TIMEOUT) {
+        // Echo received character back to terminal
+        putchar(c);
+        
+        if (c == '\r' || c == '\n') {
+            if (cmd_index > 0) {
+                cmd_buffer[cmd_index] = '\0';  // Null terminate
+                cmd_ready = true;
+                putchar('\n');  // Echo newline
+            }
+        } 
+        else if (c == 8 || c == 127) {  // Backspace or Delete
+            if (cmd_index > 0) {
+                cmd_index--;
+                // Echo backspace-space-backspace to erase character on terminal
+                putchar(8);
+                putchar(' ');
+                putchar(8);
+            }
+        } 
+        else if (cmd_index < MAX_CMD_LEN - 1) {
+            cmd_buffer[cmd_index++] = c;
+        }
+    }
+    
+    if (cmd_ready) {
+        process_command(cmd_buffer);
+        cmd_index = 0;
+        cmd_ready = false;
+    }
+}
 //LOGGING
 
 void log_index_error(int index) 
@@ -132,6 +264,22 @@ void log_setpoint_reached(float read, float difference)
     printf("\n");
 }
 
+void display_startup_message() {
+    printf("\n\n");
+    printf("==========================================\n");
+    printf("     PWM Control System with Serial UI    \n");
+    printf("==========================================\n");
+    printf("Current Parameters:\n");
+    printf("  Tolerance    : %.4f\n", tolerance);
+    printf("  Quad Buffer  : %d\n", quad_buffer);
+    printf("  Null Buffer  : %d\n", null_buffer);
+    printf("  Peak Buffer  : %d\n", peak_buffer);
+    printf("  Gain         : %d (fixed)\n", GAIN);
+    printf("\n");
+    printf("Type 'help' for available commands\n");
+    printf("==========================================\n\n");
+}
+
 //-------------------------------------------------------------------------------------------------------------------
 
 //Functional Code
@@ -160,6 +308,31 @@ void initialize_pwm()
     pwm_config config = pwm_get_default_config();
     pwm_config_set_clkdiv(&config, 1.f); // Set to fastest frequency to work with external RC filter
     pwm_init(slice_num, &config, true);  // Start PWM with the config
+}
+
+void initialize_button()
+{
+    gpio_init(BUTTON_PIN);
+    gpio_set_dir(BUTTON_PIN, GPIO_IN);
+    gpio_pull_up(BUTTON_PIN);
+}
+
+void initialize_led()
+{
+    gpio_init(LED_PIN);
+    gpio_set_dir(LED_PIN, GPIO_OUT);
+}
+
+void initialize_shorts()
+{
+    gpio_init(NULL_PIN);
+    gpio_init(QUAD_PLUS_PIN);
+    gpio_init(QUAD_MINUS_PIN);
+    gpio_init(QUAD_PLUS_PIN);
+    gpio_set_dir(NULL_PIN, GPIO_IN);
+    gpio_set_dir(QUAD_MINUS_PIN, GPIO_IN);
+    gpio_set_dir(QUAD_PLUS_PIN, GPIO_IN);
+    gpio_set_dir(PEAK_PIN, GPIO_IN);
 }
 
 float read_voltage() 
@@ -307,9 +480,9 @@ void sweep()
         int dac_value = pwm_value * step_size;
         
         set_pwm_dac(dac_value);
-        printf("%d:", dac_value);
+        //printf("%d:", dac_value);
         read = read_voltage();  
-        printf("%.4f\n", read);
+        //printf("%.4f\n", read);
     
         result_array[pwm_value] = read;
 
@@ -330,7 +503,7 @@ void go_to_setpoint()
 {
     float read        = 0.0f;
     float difference  = 0.0f;
-    int voltage_step  = 0;
+    int voltage_step  = 2500;
     int step_size     = MAX_16BIT_STEPS / MAX_12BIT_STEPS; //Use 12-bit step size for faster convergence
     
     log_selected_setpoint();
@@ -527,17 +700,18 @@ void process_quad_minus() {
         //Handle edge case 
         if (current_output_voltage_step <= MIN_VOLTAGE_STEP || current_output_voltage_step >= MAX_VOLTAGE_STEP) 
         {
+            gpio_put(LED_PIN, 1);
             go_to_quad_minus();
             printf("EDGE CASE\n");
             
         }
 
         difference = fabs(current_input_voltage - selected_setpoint);
-        printf("Difference:      %.4f\n", difference);
+        //printf("Difference:      %.4f\n", difference);
 
     }
 
-    printf("\n");
+    //printf("\n");
 
 }
 
@@ -574,17 +748,18 @@ void process_quad_plus() {
         //Handle edge case 
         if (current_output_voltage_step <= MIN_VOLTAGE_STEP || current_output_voltage_step >= MAX_VOLTAGE_STEP) 
         {
+            gpio_put(LED_PIN, 1);
             go_to_quad_plus();
             printf("EDGE CASE\n");
             
         }
 
         difference = fabs(current_input_voltage - selected_setpoint);
-        printf("Difference:      %.4f\n", difference);
+        //printf("Difference:      %.4f\n", difference);
 
     }
 
-    printf("\n");
+    //printf("\n");
 
 }
 
@@ -615,7 +790,7 @@ bool process_slope_peak()
     {
         next_read = move(current_output_voltage_step + GAIN);
         i++;
-        printf("i: %d\n", i);
+        //printf("i: %d\n", i);
     }
 
     if (initial_read > next_read)
@@ -664,7 +839,7 @@ void process_peak()
         if (difference > prev_difference)
         {
             buffer++;
-            printf("J\n");
+            //printf("J\n");
             
             if ((direction == MOVE_RIGHT) && (buffer == peak_buffer))
             {
@@ -679,10 +854,11 @@ void process_peak()
                 
             }
         }
-        printf("difference = %.4f\n", difference);
+        //printf("difference = %.4f\n", difference);
 
         if (current_output_voltage_step <= MIN_VOLTAGE_STEP || current_output_voltage_step >= MAX_VOLTAGE_STEP) 
         {
+            gpio_put(LED_PIN, 1);
             go_to_setpoint();
             printf("EDGE CASE\n");
             
@@ -713,7 +889,7 @@ bool process_slope_null()
     {
         next_read = move(current_output_voltage_step + GAIN);
         i++;
-        printf("i: %d\n", i);
+        //printf("i: %d\n", i);
     }
 
     if (initial_read > next_read)
@@ -762,7 +938,7 @@ void process_null()
         if (difference > prev_difference)
         {
             buffer++;
-            printf("J\n");
+            //printf("J\n");
             
             if ((direction == MOVE_RIGHT) && (buffer == null_buffer))
             {
@@ -777,30 +953,23 @@ void process_null()
                 
             }
         }
-        printf("difference = %.4f\n", difference);
+        //printf("difference = %.4f\n", difference);
 
+
+        //EDGE CASE HANDELING
         if (current_output_voltage_step <= MIN_VOLTAGE_STEP || current_output_voltage_step >= MAX_VOLTAGE_STEP) 
         {
+            gpio_put(LED_PIN, 1);
             go_to_setpoint();
             printf("EDGE CASE\n");
             
         }
 
     }
-
 }
 
-int main()
+void go_to_desired_setpoint()
 {
-    stdio_init_all();
-    
-    //Initialize hardware
-    initialize_pwm();
-    initialize_adc();
-
-    //sleep_ms(10000); //This is only used if logging data to open putty up in time
-    sweep();
-
     if (set_point == PEAK_POINT) 
     {
         selected_setpoint = peak_setpoint;
@@ -824,20 +993,172 @@ int main()
         selected_setpoint = null_setpoint;
         go_to_setpoint();
     }
+}
+
+void button_isr(uint gpio, uint32_t events)
+{
+    if(gpio == BUTTON_PIN)
+    {
+        button_pressed = true;
+    }
+}
+
+/*
+void pin_isr(uint gpio, uint32_t events)
+{
+    if(gpio == NULL_PIN) 
+    {
+        null_pin = true;
+    }
+    else if (gpio == QUAD_MINUS_PIN)
+    {
+        quad_minus_pin = true;
+    }
+    else if (gpio == QUAD_PLUS_PIN)
+    {
+        quad_plus_pin = true;
+    }
+    else if (gpio == PEAK_PIN)
+    {
+        peak_pin = true;
+    }
+}
+*/
+
+void test_pins()
+{
+    if(gpio_get(NULL_PIN) == true)
+    {
+        null_pin = true;
+        set_point = NULL_POINT;
+    }
+    else if (gpio_get(QUAD_MINUS_PIN) == true)
+    {
+        quad_minus_pin = true;
+        set_point = QUAD_MINUS;
+    }
+    else if (gpio_get(QUAD_PLUS_PIN) == true)
+    {
+        quad_plus_pin = true;
+        set_point = QUAD_PLUS;
+    }
+    else if (gpio_get(PEAK_PIN) == true)
+    {
+        peak_pin = true;
+        set_point = PEAK_POINT;
+    }
+}
+
+/*
+void select_setpoint()
+{
+    if (null_pin == true)
+    {
+        //null_pin = false;
+        set_point = NULL_POINT;
+        selected_setpoint = null_setpoint;
+    }
+
+    else if (quad_minus_pin == true)
+    {
+        //quad_minus_pin = false;
+        set_point = QUAD_MINUS;
+        selected_setpoint = quad_setpoint;
+    }
+
+    else if (quad_plus_pin == true)
+    {
+        //quad_plus_pin = false;
+        set_point = QUAD_PLUS; 
+        selected_setpoint = quad_setpoint;   
+    }
+
+    else if (peak_pin == true)
+    {
+        //peak_pin = false;
+        set_point = PEAK_POINT;
+        selected_setpoint = peak_setpoint;
+    }
+}
+*/
+
+int main()
+{
+    stdio_init_all();
+    
+    //Initialize hardware
+    initialize_pwm();
+    initialize_adc();
+    initialize_button();
+    initialize_led();
+    initialize_shorts();
+
+    gpio_put(LED_PIN, 0);
+
+    // Print welcome message and help info
+    printf("\n=== Interferometer Control System ===\n");
+    printf("Type 'help' for available commands\n\n");
+
+    while (!peak_pin && !null_pin && !quad_minus_pin && !quad_plus_pin)
+    {
+        test_pins();
+        check_serial_input();
+    }
+
+    
+    //sleep_ms(10000); //This is only used if logging data to open putty up in time
+    sweep();
+    go_to_desired_setpoint();
+
+    gpio_set_irq_enabled_with_callback(BUTTON_PIN, GPIO_IRQ_EDGE_FALL, true, &button_isr);
+    
+    /*
+    gpio_set_irq_enabled_with_callback(NULL_PIN, GPIO_IRQ_EDGE_RISE, true, &pin_isr);
+    gpio_set_irq_enabled_with_callback(QUAD_MINUS_PIN, GPIO_IRQ_EDGE_RISE, true, &pin_isr);
+    gpio_set_irq_enabled_with_callback(QUAD_PLUS_PIN, GPIO_IRQ_EDGE_RISE, true, &pin_isr);
+    gpio_set_irq_enabled_with_callback(PEAK_PIN, GPIO_IRQ_EDGE_RISE, true, &pin_isr);
+    */
 
     while(1) 
     
     {
-        
+        check_serial_input();
         current_input_voltage = read_voltage();
 
+        if (current_input_voltage < NOISE_FLOOR)
+        { 
+            gpio_put(LED_PIN, 1);
+        }
+
+        else 
+        {
+            gpio_put(LED_PIN, 0);
+        }
+
+        if(button_pressed)
+            {
+                button_pressed = false;
+                sleep_ms(200);
+                sweep();
+                go_to_desired_setpoint();
+            }
+        
+        /*
+        if(peak_pin || null_pin || quad_plus_pin || quad_minus_pin)
+        {
+            select_setpoint();
+            sweep();
+            go_to_desired_setpoint();
+        }
+        */
+        
         if (fabs(current_input_voltage - selected_setpoint) > tolerance) 
         
         {
             
             //DEBUG
-            printf("Process_setpoint     \n");
-            printf("Current input voltage %.4f\n", current_input_voltage);
+            //printf("Process_setpoint     \n");
+            //printf("Current input voltage %.4f\n", current_input_voltage);
            
             if (set_point == PEAK_POINT)
             {
@@ -859,6 +1180,7 @@ int main()
                 process_null();
             }
 
+            check_serial_input();
             sleep_ms(1000); //Reason: readable output and control stability 
 
         }
@@ -868,13 +1190,20 @@ int main()
         {
 
             //DEBUG
-            printf("Setpoint in limit\n");
-            printf("Input Voltage:   %.4f\n", current_input_voltage);
+            //printf("Setpoint in limit\n");
+            //printf("Input Voltage:   %.4f\n", current_input_voltage);
             sleep_ms(1000);
 
         }
+
+        // If parameters were changed via serial commands, you might want to update settings
+        if (params_changed) {
+            printf("Parameters updated. Continuing with new settings...\n");
+            params_changed = false;
+        }
     
-    }   
+    }  
+ 
 }
 
 
