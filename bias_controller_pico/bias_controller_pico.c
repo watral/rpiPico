@@ -5,16 +5,32 @@
 #include "pico/stdlib.h"
 #include "hardware/pwm.h"
 #include "hardware/adc.h"
+#include "hardware/flash.h"
+#include "hardware/sync.h"
 
-//TODO: BUTTON RESWEEP, SWITCH SELECT QUAD_PLUS/NULL OR QUAD_PLUS/PEAK, POTENTIAL EDGE CASE HANDELING
+#define FLASH_TARGET_OFFSET (1 * 1024 * 1024)  // 1MB offset from start of flash
+//#define FLASH_SECTOR_SIZE   4096
+//#define FLASH_PAGE_SIZE     256
+
+#define PARAM_MAGIC 0xABCD1234 // Magic number to identify valid parameter block
+
+// Structure to hold persistent parameters
+typedef struct {
+    uint32_t magic;            // Magic number to validate stored data
+    float tolerance;
+    int quad_buffer;
+    int null_buffer;
+    int peak_buffer;
+    uint32_t checksum;         // Simple checksum for data integrity
+} persistent_params_t;
 
 /*
 SUGGESTED RANGE FOR MODIFIED VARIABLES/ORIGINAL VALUES
 
 TOLERANCE: 0.0032 -> 0.1 : ORIGINAL VALUE 0.0064 QUAD, 0.05 PEAK/NULL : CHANGE FOR GREATER CONTROL LOOP ACCURACY, DECREASE FOR HIGHER ACCURACY, INCREASE FOR NOISE MITIGATION
 QUAD_BUFFER: 5 -> 100    : ORIGINAL VALUE 10     : INCREASE THIS VALUE IF WRONG QUAD (+/-) IS FOUND AFTER SWEEP, DECREASE THIS VALUE IF QUAD IS NOT FOUND AT ALL
-NULL_BUFFER: 25 -> 500   : ORIGINAL VALUE 200    : INCREASE THIS VALUE IF NULL DOESNT SETTLE, DECREASE THIS VALUE IF THERE IS TO MUCH NOISE WHILE NULL LOCKED 
-PEAK_BUFFER: 25 -> 500   : ORIGINAL VALUE 200    : SAME AS ABOVE BUT FOR PEAK
+NULL_BUFFER: 25 -> 500   : ORIGINAL VALUE 50    : INCREASE THIS VALUE IF NULL DOESNT SETTLE, DECREASE THIS VALUE IF THERE IS TO MUCH NOISE WHILE NULL LOCKED 
+PEAK_BUFFER: 25 -> 500   : ORIGINAL VALUE 50   : SAME AS ABOVE BUT FOR PEAK
 GAIN: 8->32              : ORIGINAL VALUE 8      : NOT ADVISED TO CHANGE, INCREASE FOR FASTER CONVERGENCE TIME TO SETPOINT
 */
 
@@ -42,7 +58,7 @@ int cmd_index = 0;
 bool cmd_ready = false;
 
 // Parameter change flags
-bool params_changed = false;
+//bool params_changed = false;
 
 #define PWM_PIN                   15                 //PIN 20
 #define BUTTON_PIN                14                 //PIN 19
@@ -63,7 +79,6 @@ bool params_changed = false;
 #define MOVE_RIGHT                1
 #define MOVE_LEFT                 0
 
-
 const int average_per_read      = 4000;                 //Amount of averaged ADC reads per single ADC read
 const int array_size            = MAX_12BIT_STEPS;      //Array size for sweep_pwm
 
@@ -80,8 +95,70 @@ volatile bool null_pin = false;
 volatile bool quad_minus_pin = false;
 volatile bool quad_plus_pin = false;
 volatile bool peak_pin = false;
+
+volatile bool save_pending = false; // Flag to indicate a pending save
 //------------------------------------------------------------------------------------------------------------------
-// Serial command processing functions
+
+// Function to calculate simple checksum
+uint32_t calculate_checksum(persistent_params_t *params) {
+    uint32_t sum = 0;
+    uint8_t *data = (uint8_t *)params;
+    // Sum all bytes except the checksum field itself
+    for (int i = 0; i < offsetof(persistent_params_t, checksum); i++) {
+        sum += data[i];
+    }
+    return sum;
+}
+
+void save_params_to_flash() {
+    // Create the parameter structure
+    persistent_params_t params = {
+        .magic = PARAM_MAGIC,
+        .tolerance = tolerance,
+        .quad_buffer = quad_buffer,
+        .null_buffer = null_buffer,
+        .peak_buffer = peak_buffer
+    };
+    params.checksum = calculate_checksum(&params);
+
+    // Save and disable interrupts before flash operations
+    uint32_t ints = save_and_disable_interrupts();
+    
+    // Erase the sector first
+    flash_range_erase(FLASH_TARGET_OFFSET, FLASH_SECTOR_SIZE);
+    
+    // Then program the data
+    flash_range_program(FLASH_TARGET_OFFSET, (uint8_t*)&params, sizeof(params));
+    
+    // Restore interrupts AFTER flash operations
+    restore_interrupts(ints);
+    
+    // Add a small delay to ensure the message is printed before continuing
+    sleep_ms(100);
+}
+
+// Load parameters from flash
+bool load_params_from_flash() {
+    // Access flash memory through XIP base address
+    persistent_params_t* stored_params = (persistent_params_t*)(XIP_BASE + FLASH_TARGET_OFFSET);
+    
+    // Check if the stored data is valid
+    if (stored_params->magic == PARAM_MAGIC) {
+        // Verify checksum
+        uint32_t calculated_checksum = calculate_checksum(stored_params);
+        if (calculated_checksum == stored_params->checksum) {
+            tolerance = stored_params->tolerance;
+            quad_buffer = stored_params->quad_buffer;
+            null_buffer = stored_params->null_buffer;
+            peak_buffer = stored_params->peak_buffer;
+            printf("Parameters loaded from flash\n");
+            return true;
+        }
+    }
+    printf("No valid parameters found in flash\n");
+    return false;
+}
+
 void process_command(char* cmd) {
     char param_name[20];
     float param_value;
@@ -92,7 +169,7 @@ void process_command(char* cmd) {
             if (param_value >= 0.0032f && param_value <= 0.1f) {
                 tolerance = param_value;
                 printf("Tolerance set to: %.4f V\n", tolerance);
-                params_changed = true;
+                //params_changed = true;
             } else {
                 printf("Invalid tolerance value. Range: 0.0032 to 0.1\n");
             }
@@ -101,7 +178,7 @@ void process_command(char* cmd) {
             if (param_value >= 5 && param_value <= 100) {
                 quad_buffer = (int)param_value;
                 printf("Quad buffer set to: %d\n", quad_buffer);
-                params_changed = true;
+                //params_changed = true;
             } else {
                 printf("Invalid quad_buffer value. Range: 5 to 100\n");
             }
@@ -110,7 +187,7 @@ void process_command(char* cmd) {
             if (param_value >= 25 && param_value <= 500) {
                 null_buffer = (int)param_value;
                 printf("Null buffer set to: %d\n", null_buffer);
-                params_changed = true;
+                //params_changed = true;
             } else {
                 printf("Invalid null_buffer value. Range: 25 to 500\n");
             }
@@ -119,7 +196,7 @@ void process_command(char* cmd) {
             if (param_value >= 25 && param_value <= 500) {
                 peak_buffer = (int)param_value;
                 printf("Peak buffer set to: %d\n", peak_buffer);
-                params_changed = true;
+                //params_changed = true;
             } else {
                 printf("Invalid peak_buffer value. Range: 25 to 500\n");
             }
@@ -127,6 +204,7 @@ void process_command(char* cmd) {
         else {
             printf("Unknown parameter: %s\n", param_name);
         }
+        
     } 
     else if (strcmp(cmd, "status") == 0) {
         // Print current parameter values
@@ -144,14 +222,31 @@ void process_command(char* cmd) {
         printf("set quad_buffer [value]  - Set quad buffer (5 to 100)\n");
         printf("set null_buffer [value]  - Set null buffer (25 to 500)\n");
         printf("set peak_buffer [value]  - Set peak buffer (25 to 500)\n");
+        printf("save                     - Save current parameters to flash memory\n");
         printf("status                   - Show current parameter values\n");
         printf("sweep                    - Force a new sweep operation\n");
         printf("help                     - Show this help menu\n");
+        printf("TIP: Add --save to any set command to immediately save to flash\n");
+        printf("     Example: set tolerance 0.01 --save\n");
         printf("--------------------\n\n");
     }
     else if (strcmp(cmd, "sweep") == 0) {
         printf("Initiating manual sweep...\n");
         button_pressed = true;
+    }
+    else if (strcmp(cmd, "save") == 0) {
+        //save_params_to_flash();
+        //params_changed = false;  // Reset the flag as we've saved
+        save_pending = true;
+    }
+    else if (strcmp(cmd, "reset") == 0) {
+        printf("Resetting parameters to defaults...\n");
+        tolerance = 0.05f;
+        quad_buffer = 10;
+        peak_buffer = 50;
+        null_buffer = 50;
+        //params_changed = true;
+        printf("Parameters reset. Type 'save' to store in flash.\n");
     }
     else {
         printf("Unknown command. Type 'help' for available commands.\n");
@@ -1082,11 +1177,12 @@ void select_setpoint()
 }
 */
 
+// Modify the main function for better flash memory handling
 int main()
 {
     stdio_init_all();
     
-    //Initialize hardware
+    // Initialize hardware
     initialize_pwm();
     initialize_adc();
     initialize_button();
@@ -1095,32 +1191,35 @@ int main()
 
     gpio_put(LED_PIN, 0);
 
-    // Print welcome message and help info
-    printf("\n=== Interferometer Control System ===\n");
-    printf("Type 'help' for available commands\n\n");
+
+    sleep_ms(10000);
+
+    // Try to load parameters from flash and handle if not found
+    bool params_loaded = load_params_from_flash();
+    if (!params_loaded) {
+        printf("Using default parameters\n");
+        // Here we're continuing with the default parameters defined at the top
+        // Let's save them to flash so they exist for next boot
+        //save_params_to_flash();
+    }
+
+
+    display_startup_message();
 
     while (!peak_pin && !null_pin && !quad_minus_pin && !quad_plus_pin)
     {
         test_pins();
         check_serial_input();
     }
-
     
-    //sleep_ms(10000); //This is only used if logging data to open putty up in time
+    // Rest of the main function remains the same
     sweep();
     go_to_desired_setpoint();
 
     gpio_set_irq_enabled_with_callback(BUTTON_PIN, GPIO_IRQ_EDGE_FALL, true, &button_isr);
     
-    /*
-    gpio_set_irq_enabled_with_callback(NULL_PIN, GPIO_IRQ_EDGE_RISE, true, &pin_isr);
-    gpio_set_irq_enabled_with_callback(QUAD_MINUS_PIN, GPIO_IRQ_EDGE_RISE, true, &pin_isr);
-    gpio_set_irq_enabled_with_callback(QUAD_PLUS_PIN, GPIO_IRQ_EDGE_RISE, true, &pin_isr);
-    gpio_set_irq_enabled_with_callback(PEAK_PIN, GPIO_IRQ_EDGE_RISE, true, &pin_isr);
-    */
-
+    // Main loop
     while(1) 
-    
     {
         check_serial_input();
         current_input_voltage = read_voltage();
@@ -1129,81 +1228,52 @@ int main()
         { 
             gpio_put(LED_PIN, 1);
         }
-
         else 
         {
             gpio_put(LED_PIN, 0);
         }
 
         if(button_pressed)
-            {
-                button_pressed = false;
-                sleep_ms(200);
-                sweep();
-                go_to_desired_setpoint();
-            }
-        
-        /*
-        if(peak_pin || null_pin || quad_plus_pin || quad_minus_pin)
         {
-            select_setpoint();
+            button_pressed = false;
+            sleep_ms(200);
             sweep();
             go_to_desired_setpoint();
         }
-        */
         
         if (fabs(current_input_voltage - selected_setpoint) > tolerance) 
-        
         {
-            
-            //DEBUG
-            //printf("Process_setpoint     \n");
-            //printf("Current input voltage %.4f\n", current_input_voltage);
-           
             if (set_point == PEAK_POINT)
             {
                 process_peak();
             }
-
             else if (set_point == QUAD_PLUS)
             {
                 process_quad_plus();
             }
-
             else if (set_point == QUAD_MINUS)
             {
                 process_quad_minus();
             }
-
             else if (set_point == NULL_POINT)
             {
                 process_null();
             }
 
             check_serial_input();
-            sleep_ms(1000); //Reason: readable output and control stability 
-
+            sleep_ms(1000); // Reason: readable output and control stability 
         }
-
         else 
-       
         {
-
-            //DEBUG
-            //printf("Setpoint in limit\n");
-            //printf("Input Voltage:   %.4f\n", current_input_voltage);
             sleep_ms(1000);
-
         }
 
-        // If parameters were changed via serial commands, you might want to update settings
-        if (params_changed) {
-            printf("Parameters updated. Continuing with new settings...\n");
-            params_changed = false;
+        // Check if a save is pending and perform it in the background
+        if (save_pending) {
+            save_params_to_flash();
+            save_pending = false; // Reset flag after saving
         }
-    
-    }  
- 
+    }
 }
 
 
