@@ -166,7 +166,7 @@ void process_command(char* cmd) {
     // Parse command for parameter updates
     if (sscanf(cmd, "set %19s %f", param_name, &param_value) == 2) {
         if (strcmp(param_name, "tolerance") == 0) {
-            if (param_value >= 0.0032f && param_value <= 0.1f) {
+            if (param_value >= 0.0f && param_value <= 0.1f) { //was 0.0032f before for param_value >= etc..
                 tolerance = param_value;
                 printf("Tolerance set to: %.4f V\n", tolerance);
                 //params_changed = true;
@@ -175,7 +175,7 @@ void process_command(char* cmd) {
             }
         } 
         else if (strcmp(param_name, "quad_buffer") == 0) {
-            if (param_value >= 5 && param_value <= 100) {
+            if (param_value >= 1 && param_value <= 100) { //was 1 before for param_value >=
                 quad_buffer = (int)param_value;
                 printf("Quad buffer set to: %d\n", quad_buffer);
                 //params_changed = true;
@@ -184,7 +184,7 @@ void process_command(char* cmd) {
             }
         } 
         else if (strcmp(param_name, "null_buffer") == 0) {
-            if (param_value >= 25 && param_value <= 500) {
+            if (param_value >= 1 && param_value <= 500) { //was 25 before param_value >=
                 null_buffer = (int)param_value;
                 printf("Null buffer set to: %d\n", null_buffer);
                 //params_changed = true;
@@ -193,7 +193,7 @@ void process_command(char* cmd) {
             }
         } 
         else if (strcmp(param_name, "peak_buffer") == 0) {
-            if (param_value >= 25 && param_value <= 500) {
+            if (param_value >= 1 && param_value <= 500) { //was 25 before param_value >=
                 peak_buffer = (int)param_value;
                 printf("Peak buffer set to: %d\n", peak_buffer);
                 //params_changed = true;
@@ -1098,28 +1098,6 @@ void button_isr(uint gpio, uint32_t events)
     }
 }
 
-/*
-void pin_isr(uint gpio, uint32_t events)
-{
-    if(gpio == NULL_PIN) 
-    {
-        null_pin = true;
-    }
-    else if (gpio == QUAD_MINUS_PIN)
-    {
-        quad_minus_pin = true;
-    }
-    else if (gpio == QUAD_PLUS_PIN)
-    {
-        quad_plus_pin = true;
-    }
-    else if (gpio == PEAK_PIN)
-    {
-        peak_pin = true;
-    }
-}
-*/
-
 void test_pins()
 {
     if(gpio_get(NULL_PIN) == true)
@@ -1145,39 +1123,25 @@ void test_pins()
 }
 
 /*
-void select_setpoint()
-{
-    if (null_pin == true)
-    {
-        //null_pin = false;
-        set_point = NULL_POINT;
-        selected_setpoint = null_setpoint;
-    }
-
-    else if (quad_minus_pin == true)
-    {
-        //quad_minus_pin = false;
-        set_point = QUAD_MINUS;
-        selected_setpoint = quad_setpoint;
-    }
-
-    else if (quad_plus_pin == true)
-    {
-        //quad_plus_pin = false;
-        set_point = QUAD_PLUS; 
-        selected_setpoint = quad_setpoint;   
-    }
-
-    else if (peak_pin == true)
-    {
-        //peak_pin = false;
-        set_point = PEAK_POINT;
-        selected_setpoint = peak_setpoint;
-    }
-}
+Rather than using complex threads to handle serial input, a simple polling delay retains
+refresh rates for sleeps > 50ms
 */
 
-// Modify the main function for better flash memory handling
+void polling_delay(int ms)
+{
+    int interval = 10;
+    int num_polls = ms / interval;
+    int i = 0;
+
+    while(i < num_polls)
+    {
+        check_serial_input();
+        sleep_ms(interval);
+        i++;
+    }
+
+}
+
 int main()
 {
     stdio_init_all();
@@ -1260,12 +1224,16 @@ int main()
                 process_null();
             }
 
-            check_serial_input();
-            sleep_ms(1000); // Reason: readable output and control stability 
+            //check_serial_input();
+            //sleep_ms(1000); // Reason: readable output and control stability 
+
+            polling_delay(1000);
         }
         else 
         {
-            sleep_ms(1000);
+            //sleep_ms(1000);
+
+            polling_delay(1000);
         }
 
         // Check if a save is pending and perform it in the background
@@ -1275,69 +1243,3 @@ int main()
         }
     }
 }
-
-
-//UNUSED CODE
-
-
-/*
-void handle_edge_case() 
-{
-    printf("Current output voltage step %d:\n", current_output_voltage_step);
-    
-    //If output voltage goes beyond limits reset it's starting point to the opposing end
-    if (current_output_voltage_step <= MIN_VOLTAGE) 
-    {
-        current_output_voltage_step = MAX_VOLTAGE;
-        
-        set_pwm_dac(current_output_voltage_step);
-        sleep_ms(1000); 
-        current_input_voltage = read_voltage();
-
-            //Keep adjusting output voltage until setpoint is reached again    
-            while (fabs(current_input_voltage - selected_setpoint) > tolerance) 
-            {
-                
-                current_output_voltage_step--;
-                set_pwm_dac(current_output_voltage_step);
-                current_input_voltage = read_voltage();
-
-                if (current_output_voltage_step == MIN_VOLTAGE) 
-                {
-                    printf("Setpoint not reachable\n");
-                    
-                    //DEBUG
-                    for (;;){}
-                    //break;
-                }
-        }
-    }
-
-    else if (current_output_voltage_step >= MAX_VOLTAGE) 
-    {
-        current_output_voltage_step = MIN_VOLTAGE;
-        
-        set_pwm_dac(current_output_voltage_step);
-        sleep_ms(1000); //allow DAC to settle 
-        current_input_voltage = read_voltage();
-   
-            while (fabs(current_input_voltage - selected_setpoint) > tolerance) 
-            {
-                
-                current_output_voltage_step++;
-                set_pwm_dac(current_output_voltage_step);
-                current_input_voltage = read_voltage();
-
-                if (current_output_voltage_step == MAX_VOLTAGE) 
-                {
-                    printf("Setpoint not reachable\n");
-                    
-                    //DEBUG
-                    for(;;){}
-                    //break;
-                }
-        }
-    }
-}
-
-*/
